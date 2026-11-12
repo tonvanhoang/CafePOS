@@ -37,19 +37,6 @@ COLUMNS = [
 def new_workbook_df():
     return pd.DataFrame(columns=COLUMNS)
 
-def read_excel(uploaded):
-    if uploaded is None:
-        return new_workbook_df()
-    try:
-        df = pd.read_excel(uploaded, sheet_name="DonHang")
-        for col in COLUMNS:
-            if col not in df.columns:
-                df[col] = None
-        return df[COLUMNS]
-    except Exception as exc:
-        st.error(f"Không đọc được file Excel: {exc}")
-        return new_workbook_df()
-
 def to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -73,17 +60,6 @@ def to_excel(df):
 
 if "orders" not in st.session_state:
     st.session_state.orders = new_workbook_df()
-if "loaded" not in st.session_state:
-    st.session_state.loaded = False
-
-with st.sidebar:
-    st.header("📁 Dữ liệu Excel")
-    uploaded = st.file_uploader("Tải file Excel hiện có để nhập tiếp", type=["xlsx"])
-    if st.button("Nạp file Excel", use_container_width=True):
-        st.session_state.orders = read_excel(uploaded)
-        st.session_state.loaded = True
-        st.success(f"Đã nạp {len(st.session_state.orders)} dòng.")
-    st.info("Nếu chưa có file, bạn có thể nhập đơn mới ngay. Sau khi nhập, hãy tải file Excel xuống để lưu dữ liệu.")
 
 tab1, tab2, tab3 = st.tabs(["➕ Nhập đơn hàng", "📋 Danh sách đơn", "📤 Xuất Excel"])
 
@@ -163,4 +139,3 @@ with tab3:
         type="primary",
         use_container_width=True,
     )
-    st.warning("Lưu ý: ứng dụng không lưu dữ liệu lâu dài trên máy chủ. Sau mỗi lần làm việc, hãy tải file Excel xuống. Lần sau, tải chính file đó lên ở thanh bên để nhập tiếp.")
