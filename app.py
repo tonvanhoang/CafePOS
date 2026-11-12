@@ -10,6 +10,24 @@ st.set_page_config(page_title="CafePOS", page_icon="☕", layout="wide")
 st.title("☕ CafePOS – Quản lý đơn hàng")
 st.caption("Nhập đơn hàng, tự tính tiền, xem danh sách và tải dữ liệu Excel.")
 
+# Danh sách 50 món nước phổ biến
+DRINK_MENU = [
+    "-- Chọn món nước --",
+    "Cà phê đen đá", "Cà phê đen nóng", "Cà phê sữa đá", "Cà phê sữa nóng",
+    "Bạc xỉu đá", "Bạc xỉu nóng", "Cà phê muối", "Cà phê cốt dừa",
+    "Cà phê trứng", "Espresso", "Americano đá", "Americano nóng",
+    "Latte đá", "Latte nóng", "Cappuccino", "Mocha",
+    "Caramel Macchiato", "Cold Brew truyền thống", "Cold Brew cam sả", "Trà đào cam sả",
+    "Trà vải hoa hồng", "Trà dâu tằm", "Trà ổi hồng", "Trà chanh giã tay",
+    "Trà tắc mật ong", "Trà gừng mật ong", "Trà sen vàng", "Trà sữa truyền thống",
+    "Trà sữa trân châu đường đen", "Trà sữa ô long", "Trà sữa thái xanh", "Trà sữa thái đỏ",
+    "Matcha đá xay", "Matcha Latte", "Socola đá xay", "Socola nóng",
+    "Cacao sữa đá", "Cacao nóng", "Nước cam ép", "Nước ép dưa hấu",
+    "Nước ép thơm (dứa)", "Nước ép cà rốt", "Nước ép táo", "Nước ép ổi",
+    "Sinh tố bơ", "Sinh tố xoài", "Sinh tố dâu", "Sinh tố việt quất",
+    "Sữa chua đánh đá", "Sữa chua việt quất"
+]
+
 COLUMNS = [
     "STT", "Ngày", "Khách hàng", "Sản phẩm", "Số lượng",
     "Đơn giá", "Tiền hàng", "Chiết khấu (%)", "Tiền giảm",
@@ -43,7 +61,7 @@ def to_excel(df):
             cell.font = Font(bold=True, color="FFFFFF")
             cell.fill = PatternFill("solid", fgColor="234E52")
             cell.alignment = Alignment(horizontal="center")
-        widths = [8, 14, 24, 24, 12, 16, 16, 16, 16, 12, 16, 20]
+        widths = [8, 14, 24, 28, 12, 16, 16, 16, 16, 12, 16, 20]
         for idx, width in enumerate(widths, start=1):
             ws.column_dimensions[get_column_letter(idx)].width = width
         for row in ws.iter_rows(min_row=2):
@@ -75,42 +93,50 @@ with tab1:
         c1, c2 = st.columns(2)
         with c1:
             order_date = st.date_input("Ngày bán", value=date.today())
-            customer = st.text_input("Tên khách hàng", placeholder="Ví dụ: Nguyễn Văn A")
-            product = st.text_input("Tên sản phẩm", placeholder="Ví dụ: Cà phê sữa")
+            customer = st.text_input("Tên khách hàng", placeholder="Ví dụ: Bàn 1 / Anh Nam")
+            product = st.selectbox("Chọn món nước", options=DRINK_MENU)
             quantity = st.number_input("Số lượng", min_value=1, value=1, step=1)
         with c2:
-            unit_price = st.number_input("Đơn giá (VNĐ)", min_value=0, value=25000, step=1000)
+            unit_price = st.number_input(
+                "Đơn giá (VNĐ) *", 
+                min_value=0, 
+                value=None, 
+                step=1000, 
+                placeholder="Bắt buộc nhập giá (VD: 25000)"
+            )
             discount = st.number_input("Chiết khấu (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
             vat = st.number_input("VAT (%)", min_value=0.0, max_value=100.0, value=8.0, step=0.5)
         submitted = st.form_submit_button("Lưu đơn hàng", type="primary", use_container_width=True)
 
     if submitted:
-        subtotal = int(quantity) * int(unit_price)
-        discount_amount = round(subtotal * discount / 100)
-        taxable = subtotal - discount_amount
-        vat_amount = round(taxable * vat / 100)
-        total = taxable + vat_amount
-        row = {
-            "STT": len(st.session_state.orders) + 1,
-            "Ngày": order_date.strftime("%d/%m/%Y"),
-            "Khách hàng": customer.strip() or "Khách lẻ",
-            "Sản phẩm": product.strip(),
-            "Số lượng": int(quantity),
-            "Đơn giá": int(unit_price),
-            "Tiền hàng": subtotal,
-            "Chiết khấu (%)": float(discount),
-            "Tiền giảm": discount_amount,
-            "VAT (%)": float(vat),
-            "Tiền VAT": vat_amount,
-            "Tổng thanh toán": total,
-        }
-        if not product.strip():
-            st.error("Vui lòng nhập tên sản phẩm.")
+        if product == "-- Chọn món nước --":
+            st.error("⚠️ Vui lòng chọn một món nước trong danh sách!")
+        elif unit_price is None or unit_price <= 0:
+            st.error("⚠️ Vui lòng nhập đơn giá hợp lệ (lớn hơn 0 đ) trước khi lưu đơn!")
         else:
+            subtotal = int(quantity) * int(unit_price)
+            discount_amount = round(subtotal * discount / 100)
+            taxable = subtotal - discount_amount
+            vat_amount = round(taxable * vat / 100)
+            total = taxable + vat_amount
+            row = {
+                "STT": len(st.session_state.orders) + 1,
+                "Ngày": order_date.strftime("%d/%m/%Y"),
+                "Khách hàng": customer.strip() or "Khách lẻ",
+                "Sản phẩm": product,
+                "Số lượng": int(quantity),
+                "Đơn giá": int(unit_price),
+                "Tiền hàng": subtotal,
+                "Chiết khấu (%)": float(discount),
+                "Tiền giảm": discount_amount,
+                "VAT (%)": float(vat),
+                "Tiền VAT": vat_amount,
+                "Tổng thanh toán": total,
+            }
             st.session_state.orders = pd.concat(
                 [st.session_state.orders, pd.DataFrame([row])], ignore_index=True
             )
-            st.success(f"Đã thêm đơn hàng. Tổng thanh toán: {total:,.0f} đ")
+            st.success(f"✅ Đã lưu đơn: {quantity} x {product}. Tổng thanh toán: {total:,.0f} đ")
 
 with tab2:
     st.subheader("Danh sách đơn hàng")
