@@ -127,7 +127,9 @@ with tab2:
         m1, m2 = st.columns(2)
         m1.metric("Tổng số đơn", f"{len(st.session_state.orders):,}")
         m2.metric("Tổng doanh thu", f"{total_revenue:,.0f} đ")
-        if st.button("Xóa toàn bộ dữ liệu trong phiên này"):
+        
+        # Thêm nút bấm xóa bộ nhớ tạm để làm sạch triệt để các dữ liệu âm cũ
+        if st.button("🗑️ Xóa toàn bộ dữ liệu trong phiên này"):
             st.session_state.orders = new_workbook_df()
             st.rerun()
     else:
@@ -136,17 +138,21 @@ with tab2:
 with tab3:
     st.subheader("📊 Biểu đồ hình cột Top 10 món nước được order nhiều nhất")
     if len(st.session_state.orders) > 0:
-        # Gom nhóm và tính tổng chuẩn xác bằng cú pháp chuẩn của Pandas
+        # Ép kiểu dữ liệu Số lượng sang dạng số dương, loại bỏ các giá trị âm nếu có
+        df_clean = st.session_state.orders.copy()
+        df_clean["Số lượng"] = pd.to_numeric(df_clean["Số lượng"], errors="coerce").fillna(0).clip(lower=0)
+
         df_top10 = (
-            st.session_state.orders.groupby("Sản phẩm")["Số lượng"]
+            df_clean.groupby("Sản phẩm")["Số lượng"]
             .sum()
+            .clip(lower=0)
             .reset_index(name="Tổng số lượng bán")
             .sort_values(by="Tổng số lượng bán", ascending=False)
             .head(10)
             .set_index("Sản phẩm")
         )
         
-        # Hiển thị biểu đồ hình cột
+        # Hiển thị biểu đồ hình cột từ 0 trở lên
         st.bar_chart(df_top10["Tổng số lượng bán"])
         st.caption("Biểu đồ cột thể hiện tổng số lượng bán ra của 10 món nước được gọi nhiều nhất.")
 
@@ -154,7 +160,7 @@ with tab3:
 
         st.subheader("📈 Biểu đồ xu hướng số lượng bán ra (Lũy kế)")
         top_products = df_top10.index.tolist()
-        df_filtered = st.session_state.orders[st.session_state.orders["Sản phẩm"].isin(top_products)]
+        df_filtered = df_clean[df_clean["Sản phẩm"].isin(top_products)]
 
         df_pivot = (
             df_filtered.pivot_table(
@@ -164,6 +170,7 @@ with tab3:
                 aggfunc="sum"
             )
             .fillna(0)
+            .clip(lower=0)
             .cumsum()
         )
         st.line_chart(df_pivot)
