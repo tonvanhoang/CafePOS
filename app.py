@@ -79,28 +79,94 @@ def get_connection():
     return conn
 
 
+
 def init_db():
-    conn = get_connection()
+    conn = sqlite3.connect(DB_NAME)
+    conn.execute("PRAGMA foreign_keys = OFF")
     cursor = conn.cursor()
 
-    # Kiểm tra database cũ
+    # Kiểm tra bảng orders hiện tại
     cursor.execute("""
         SELECT name FROM sqlite_master
         WHERE type='table' AND name='orders'
     """)
-    old_table = cursor.fetchone()
+    table = cursor.fetchone()
 
-    if old_table:
+    if table:
         cursor.execute("PRAGMA table_info(orders)")
         columns = [col[1] for col in cursor.fetchall()]
 
-        # Nếu phát hiện cấu trúc database cũ thì đổi tên
+        # Nếu là database cũ thì chuyển đổi
         if "stt" in columns and "ma_don" not in columns:
+
             cursor.execute("""
-                ALTER TABLE orders RENAME TO orders_legacy
+                CREATE TABLE IF NOT EXISTS orders_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ma_don TEXT UNIQUE,
+                    ngay TEXT,
+                    khach_hang TEXT,
+                    chiet_khau INTEGER DEFAULT 0,
+                    vat INTEGER DEFAULT 8,
+                    tien_hang INTEGER DEFAULT 0,
+                    tien_giam INTEGER DEFAULT 0,
+                    tien_vat INTEGER DEFAULT 0,
+                    tong_thanh_toan INTEGER DEFAULT 0
+                )
             """)
 
-    # Bảng đơn hàng
+            cursor.execute("SELECT * FROM orders")
+            rows = cursor.fetchall()
+
+            old_columns = [
+                col[1] for col in
+                conn.execute("PRAGMA table_info(orders)").fetchall()
+            ]
+
+            for row in rows:
+                old = dict(zip(old_columns, row))
+
+                ma_don = "OLD-" + str(old["id"])
+
+                cursor.execute("""
+                    INSERT OR IGNORE INTO orders_new (
+                        ma_don, ngay, khach_hang,
+                        chiet_khau, vat, tien_hang,
+                        tien_giam, tien_vat, tong_thanh_toan
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    ma_don,
+                    old.get("ngay"),
+                    old.get("khach_hang", "Khách lẻ"),
+                    old.get("chiet_khau", 0),
+                    old.get("vat", 8),
+                    old.get("tien_hang", 0),
+                    old.get("tien_giam", 0),
+                    old.get("tien_vat", 0),
+                    old.get("tong_thanh_toan", 0)
+                ))
+
+                cursor.execute("""
+                    INSERT INTO order_items (
+                        order_id, san_pham,
+                        so_luong, don_gia, tien_hang
+                    )
+                    SELECT
+                        n.id, ?, ?, ?, ?
+                    FROM orders_new n
+                    WHERE n.ma_don = ?
+                """, (
+                    old.get("san_pham", "Sản phẩm cũ"),
+                    old.get("so_luong", 1),
+                    old.get("don_gia", 0),
+                    old.get("tien_hang", 0),
+                    ma_don
+                ))
+
+            cursor.execute("DROP TABLE orders")
+            cursor.execute("ALTER TABLE orders_new RENAME TO orders")
+
+    # Đảm bảo bảng orders tồn tại
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -116,7 +182,7 @@ def init_db():
         )
     """)
 
-    # Bảng chi tiết từng sản phẩm trong đơn
+    # Đảm bảo bảng chi tiết tồn tại
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS order_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,73 +198,7 @@ def init_db():
     """)
 
     conn.commit()
-
-    # Chuyển dữ liệu từ database cũ sang database mới
-    cursor.execute("""
-        SELECT name FROM sqlite_master
-        WHERE type='table' AND name='orders_legacy'
-    """)
-
-    if cursor.fetchone():
-        cursor.execute("SELECT * FROM orders_legacy")
-        old_rows = cursor.fetchall()
-
-        old_columns = [
-            col[1] for col in
-            conn.execute("PRAGMA table_info(orders_legacy)").fetchall()
-        ]
-
-        for old_row in old_rows:
-            old = dict(zip(old_columns, old_row))
-
-            ma_don = "OLD-" + str(old.get("id", uuid.uuid4().hex[:8]))
-
-            # Mỗi đơn cũ được giữ thành một đơn riêng
-            cursor.execute("""
-                INSERT OR IGNORE INTO orders (
-                    ma_don, ngay, khach_hang,
-                    chiet_khau, vat, tien_hang,
-                    tien_giam, tien_vat, tong_thanh_toan
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                ma_don,
-                old.get("ngay", date.today().isoformat()),
-                old.get("khach_hang", "Khách lẻ"),
-                old.get("chiet_khau", 0),
-                old.get("vat", 8),
-                old.get("tien_hang", 0),
-                old.get("tien_giam", 0),
-                old.get("tien_vat", 0),
-                old.get("tong_thanh_toan", 0)
-            ))
-
-            cursor.execute(
-                "SELECT id FROM orders WHERE ma_don=?",
-                (ma_don,)
-            )
-            order = cursor.fetchone()
-
-            if order:
-                cursor.execute("""
-                    INSERT INTO order_items (
-                        order_id, san_pham, so_luong,
-                        don_gia, tien_hang
-                    )
-                    VALUES (?, ?, ?, ?, ?)
-                """, (
-                    order[0],
-                    old.get("san_pham", "Sản phẩm cũ"),
-                    old.get("so_luong", 1),
-                    old.get("don_gia", 0),
-                    old.get("tien_hang", 0)
-                ))
-
-        cursor.execute("DROP TABLE orders_legacy")
-
-    conn.commit()
     conn.close()
-
 
 init_db()
 
