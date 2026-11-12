@@ -8,7 +8,7 @@ from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="CafePOS Database", page_icon="☕", layout="wide")
 
-st.title("☕ CafePOS – Quản lý đơn hàng (Lưu Database SQLite)")
+st.title("☕ CafePOS – Quản lý đơn hàng")
 st.caption("Nhập đơn hàng tự động lưu vào database, tự tính tiền, xem danh sách, thống kê biểu đồ cột.")
 
 # --- CƠ SỞ DỮ LIỆU SQLITE ---
