@@ -8,7 +8,7 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="CafePOS", page_icon="☕", layout="wide")
 
 st.title("☕ CafePOS – Quản lý đơn hàng")
-st.caption("Nhập đơn hàng, tự tính tiền, xem danh sách và tải dữ liệu Excel.")
+st.caption("Nhập đơn hàng, tự tính tiền, xem danh sách, biểu đồ thống kê và tải dữ liệu Excel.")
 
 # Danh sách 50 món nước phổ biến
 DRINK_MENU = [
@@ -61,7 +61,8 @@ def to_excel(df):
 if "orders" not in st.session_state:
     st.session_state.orders = new_workbook_df()
 
-tab1, tab2, tab3 = st.tabs(["➕ Nhập đơn hàng", "📋 Danh sách đơn", "📤 Xuất Excel"])
+# Thêm 4 Tab giao diện
+tab1, tab2, tab3, tab4 = st.tabs(["➕ Nhập đơn hàng", "📋 Danh sách đơn", "📊 Thống kê biểu đồ", "📤 Xuất Excel"])
 
 with tab1:
     st.subheader("Thông tin đơn hàng")
@@ -128,7 +129,7 @@ with tab2:
     else:
         st.info("Chưa có đơn hàng. Hãy nhập đơn ở tab “Nhập đơn hàng”.")
 
-with tab3:
+with tab4:
     st.subheader("Tải dữ liệu về máy")
     st.write("File Excel gồm toàn bộ đơn hàng hiện có trong phiên làm việc.")
     st.download_button(
@@ -139,3 +140,17 @@ with tab3:
         type="primary",
         use_container_width=True,
     )
+
+with tab3:
+    st.subheader("📊 Biểu đồ thống kê số lượng món nước được mua")
+    if len(st.session_state.orders) > 0:
+        # Gom nhóm tổng số lượng theo từng sản phẩm và sắp xếp từ thấp đến cao
+        df_chart = st.session_state.orders.groupby("Sản phẩm")["Số lượng"].sum().reset_index()
+        df_chart = df_chart.sort_values(by="Số lượng", ascending=True)
+        df_chart = df_chart.set_index("Sản phẩm")
+        
+        # Hiển thị biểu đồ dạng cột ngang (bar chart)
+        st.bar_chart(df_chart, horizontal=True)
+        st.caption("Biểu đồ hiển thị tổng số lượng khách mua của từng món (sắp xếp từ thấp đến cao).")
+    else:
+        st.info("Chưa có dữ liệu đơn hàng để vẽ biểu đồ. Vui lòng nhập thêm đơn ở tab đầu tiên.")
