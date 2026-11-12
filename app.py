@@ -8,7 +8,7 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="CafePOS", page_icon="☕", layout="wide")
 
 st.title("☕ CafePOS – Quản lý đơn hàng")
-st.caption("Nhập đơn hàng, tự tính tiền, xem danh sách, thống kê Top 10 và tải dữ liệu Excel.")
+st.caption("Nhập đơn hàng, tự tính tiền, xem danh sách, biểu đồ thống kê Top 10 & xu hướng, xuất Excel.")
 
 # Danh sách 50 món nước phổ biến
 DRINK_MENU = [
@@ -61,7 +61,12 @@ def to_excel(df):
 if "orders" not in st.session_state:
     st.session_state.orders = new_workbook_df()
 
-tab1, tab2, tab3, tab4 = st.tabs(["➕ Nhập đơn hàng", "📋 Danh sách đơn", "🏆 Top 10 món bán chạy", "📤 Xuất Excel"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "➕ Nhập đơn hàng",
+    "📋 Danh sách đơn",
+    "📊 Thống kê & Biểu đồ",
+    "📤 Xuất Excel"
+])
 
 with tab1:
     st.subheader("Thông tin đơn hàng")
@@ -74,13 +79,12 @@ with tab1:
             quantity = st.number_input("Số lượng", min_value=1, value=1, step=1)
         with c2:
             unit_price = st.number_input(
-                "Đơn giá (VNĐ) *", 
-                min_value=0, 
-                value=None, 
-                step=1000, 
+                "Đơn giá (VNĐ) *",
+                min_value=0,
+                value=None,
+                step=1000,
                 placeholder="Bắt buộc nhập giá (VD: 25000)"
             )
-            # Bước nhảy số nguyên 1, 2, 3...
             discount = st.number_input("Chiết khấu (%)", min_value=0, max_value=100, value=0, step=1, format="%d")
             vat = st.number_input("VAT (%)", min_value=0, max_value=100, value=8, step=1, format="%d")
         submitted = st.form_submit_button("Lưu đơn hàng", type="primary", use_container_width=True)
@@ -130,26 +134,40 @@ with tab2:
         st.info("Chưa có đơn hàng. Hãy nhập đơn ở tab “Nhập đơn hàng”.")
 
 with tab3:
-    st.subheader("🏆 Bảng thống kê 10 món nước được order nhiều nhất")
+    st.subheader("📊 Biểu đồ hình cột Top 10 món nước được order nhiều nhất")
     if len(st.session_state.orders) > 0:
+        # Gom nhóm và tính tổng chuẩn xác bằng cú pháp chuẩn của Pandas
         df_top10 = (
-            st.session_state.orders.groupby("Sản phẩm", as_index=False)
-            .agg(
-                **{
-                    "Tổng số lượng bán": ("Số lượng", "sum"),
-                    "Tổng doanh thu": ("Tổng thanh toán", "sum")
-                }
-            )
-            .sort_values(by=["Tổng số lượng bán", "Tổng doanh thu"], ascending=[False, False])
+            st.session_state.orders.groupby("Sản phẩm")["Số lượng"]
+            .sum()
+            .reset_index(name="Tổng số lượng bán")
+            .sort_values(by="Tổng số lượng bán", ascending=False)
             .head(10)
-            .reset_index(drop=True)
+            .set_index("Sản phẩm")
         )
-        df_top10.insert(0, "Hạng", range(1, len(df_top10) + 1))
         
-        df_top10_display = df_top10.copy()
-        df_top10_display["Tổng doanh thu"] = df_top10_display["Tổng doanh thu"].apply(lambda x: f"{x:,.0f} đ")
-        
-        st.dataframe(df_top10_display, use_container_width=True, hide_index=True)
+        # Hiển thị biểu đồ hình cột
+        st.bar_chart(df_top10["Tổng số lượng bán"])
+        st.caption("Biểu đồ cột thể hiện tổng số lượng bán ra của 10 món nước được gọi nhiều nhất.")
+
+        st.divider()
+
+        st.subheader("📈 Biểu đồ xu hướng số lượng bán ra (Lũy kế)")
+        top_products = df_top10.index.tolist()
+        df_filtered = st.session_state.orders[st.session_state.orders["Sản phẩm"].isin(top_products)]
+
+        df_pivot = (
+            df_filtered.pivot_table(
+                index="STT",
+                columns="Sản phẩm",
+                values="Số lượng",
+                aggfunc="sum"
+            )
+            .fillna(0)
+            .cumsum()
+        )
+        st.line_chart(df_pivot)
+        st.caption("Biểu đồ đường thể hiện biến động số lượng các món nước qua từng đơn hàng.")
     else:
         st.info("Chưa có dữ liệu đơn hàng để thống kê. Vui lòng nhập thêm đơn ở tab đầu tiên.")
 
