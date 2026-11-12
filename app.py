@@ -1,14 +1,80 @@
 import streamlit as st
 import pandas as pd
+import sqlite3
 from io import BytesIO
 from datetime import date
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
-st.set_page_config(page_title="CafePOS", page_icon="☕", layout="wide")
+st.set_page_config(page_title="CafePOS Database", page_icon="☕", layout="wide")
 
-st.title("☕ CafePOS – Quản lý đơn hàng")
-st.caption("Nhập đơn hàng, tự tính tiền, xem danh sách, biểu đồ thống kê Top 10 & xu hướng, xuất Excel.")
+st.title("☕ CafePOS – Quản lý đơn hàng (Lưu Database SQLite)")
+st.caption("Nhập đơn hàng tự động lưu vào database, tự tính tiền, xem danh sách, thống kê biểu đồ cột.")
+
+# --- CƠ SỞ DỮ LIỆU SQLITE ---
+DB_NAME = "cafepos.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            stt INTEGER,
+            ngay TEXT,
+            khach_hang TEXT,
+            san_pham TEXT,
+            so_luong INTEGER,
+            don_gia INTEGER,
+            tien_hang INTEGER,
+            chiet_khau INTEGER,
+            tien_giam INTEGER,
+            vat INTEGER,
+            tien_vat INTEGER,
+            tong_thanh_toan INTEGER
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+COLUMNS = [
+    "STT", "Ngày", "Khách hàng", "Sản phẩm", "Số lượng",
+    "Đơn giá", "Tiền hàng", "Chiết khấu (%)", "Tiền giảm",
+    "VAT (%)", "Tiền VAT", "Tổng thanh toán"
+]
+
+def load_data_from_db():
+    conn = sqlite3.connect(DB_NAME)
+    try:
+        df = pd.read_sql("SELECT stt AS STT, ngay AS Ngày, khach_hang AS `Khách hàng`, san_pham AS `Sản phẩm`, so_luong AS `Số lượng`, don_gia AS `Đơn giá`, tien_hang AS `Tiền hàng`, chiet_khau AS `Chiết khấu (%)`, tien_giam AS `Tiền giảm`, vat AS `VAT (%)`, tien_vat AS `Tiền VAT`, tong_thanh_toan AS `Tổng thanh toán` FROM orders", conn)
+    except Exception:
+        df = pd.DataFrame(columns=COLUMNS)
+    conn.close()
+    return df
+
+def save_order_to_db(row):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO orders (stt, ngay, khach_hang, san_pham, so_luong, don_gia, tien_hang, chiet_khau, tien_giam, vat, tien_vat, tong_thanh_toan)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        row["STT"], row["Ngày"], row["Khách hàng"], row["Sản phẩm"], 
+        row["Số lượng"], row["Đơn giá"], row["Tiền hàng"], row["Chiết khấu (%)"], 
+        row["Tiền giảm"], row["VAT (%)"], row["Tiền VAT"], row["Tổng thanh toán"]
+    ))
+    conn.commit()
+    conn.close()
+
+def clear_db():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DROP TABLE IF EXISTS orders")
+    conn.commit()
+    conn.close()
+    init_db()
 
 # Danh sách 50 món nước phổ biến
 DRINK_MENU = [
@@ -27,15 +93,6 @@ DRINK_MENU = [
     "Sinh tố bơ", "Sinh tố xoài", "Sinh tố dâu", "Sinh tố việt quất",
     "Sữa chua đánh đá", "Sữa chua việt quất"
 ]
-
-COLUMNS = [
-    "STT", "Ngày", "Khách hàng", "Sản phẩm", "Số lượng",
-    "Đơn giá", "Tiền hàng", "Chiết khấu (%)", "Tiền giảm",
-    "VAT (%)", "Tiền VAT", "Tổng thanh toán"
-]
-
-def new_workbook_df():
-    return pd.DataFrame(columns=COLUMNS)
 
 def to_excel(df):
     output = BytesIO()
@@ -58,8 +115,9 @@ def to_excel(df):
     output.seek(0)
     return output.getvalue()
 
+# Lấy dữ liệu từ Database lên session state mỗi khi chạy app
 if "orders" not in st.session_state:
-    st.session_state.orders = new_workbook_df()
+    st.session_state.orders = load_data_from_db()
 
 tab1, tab2, tab3, tab4 = st.tabs([
     "➕ Nhập đơn hàng",
@@ -100,8 +158,12 @@ with tab1:
             taxable = subtotal - discount_amount
             vat_amount = round(taxable * int(vat) / 100)
             total = taxable + vat_amount
+            
+            current_df = load_data_from_db()
+            next_stt = len(current_df) + 1
+            
             row = {
-                "STT": len(st.session_state.orders) + 1,
+                "STT": next_stt,
                 "Ngày": order_date.strftime("%d/%m/%Y"),
                 "Khách hàng": customer.strip() or "Khách lẻ",
                 "Sản phẩm": product,
@@ -114,32 +176,41 @@ with tab1:
                 "Tiền VAT": vat_amount,
                 "Tổng thanh toán": total,
             }
-            st.session_state.orders = pd.concat(
-                [st.session_state.orders, pd.DataFrame([row])], ignore_index=True
-            )
-            st.success(f"✅ Đã lưu đơn: {quantity} x {product}. Tổng thanh toán: {total:,.0f} đ")
+            
+            # Lưu vào Database SQLite vật lý
+            save_order_to_db(row)
+            # Cập nhật lại session state
+            st.session_state.orders = load_data_from_db()
+            
+            st.success(f"✅ Đã lưu vào Database thành công: {quantity} x {product}. Tổng: {total:,.0f} đ")
 
 with tab2:
-    st.subheader("Danh sách đơn hàng")
-    if len(st.session_state.orders) > 0:
-        st.dataframe(st.session_state.orders, use_container_width=True, hide_index=True)
-        total_revenue = pd.to_numeric(st.session_state.orders["Tổng thanh toán"], errors="coerce").fillna(0).sum()
+    st.subheader("Danh sách đơn hàng (Lưu trữ từ Database)")
+    if st.button("🔄 Làm mới dữ liệu"):
+        st.session_state.orders = load_data_from_db()
+        st.rerun()
+        
+    df_current = load_data_from_db()
+    if len(df_current) > 0:
+        st.dataframe(df_current, use_container_width=True, hide_index=True)
+        total_revenue = pd.to_numeric(df_current["Tổng thanh toán"], errors="coerce").fillna(0).sum()
         m1, m2 = st.columns(2)
-        m1.metric("Tổng số đơn", f"{len(st.session_state.orders):,}")
+        m1.metric("Tổng số đơn", f"{len(df_current):,}")
         m2.metric("Tổng doanh thu", f"{total_revenue:,.0f} đ")
         
-        # Thêm nút bấm xóa bộ nhớ tạm để làm sạch triệt để các dữ liệu âm cũ
-        if st.button("🗑️ Xóa toàn bộ dữ liệu trong phiên này"):
-            st.session_state.orders = new_workbook_df()
+        if st.button("🗑️ Xóa sạch toàn bộ Database"):
+            clear_db()
+            st.session_state.orders = load_data_from_db()
+            st.success("Đã xóa sạch dữ liệu trong database!")
             st.rerun()
     else:
-        st.info("Chưa có đơn hàng. Hãy nhập đơn ở tab “Nhập đơn hàng”.")
+        st.info("Chưa có đơn hàng nào trong database.")
 
 with tab3:
     st.subheader("📊 Biểu đồ hình cột Top 10 món nước được order nhiều nhất")
-    if len(st.session_state.orders) > 0:
-        # Ép kiểu dữ liệu Số lượng sang dạng số dương, loại bỏ các giá trị âm nếu có
-        df_clean = st.session_state.orders.copy()
+    df_current = load_data_from_db()
+    if len(df_current) > 0:
+        df_clean = df_current.copy()
         df_clean["Số lượng"] = pd.to_numeric(df_clean["Số lượng"], errors="coerce").fillna(0).clip(lower=0)
 
         df_top10 = (
@@ -151,8 +222,6 @@ with tab3:
             .head(10)
             .set_index("Sản phẩm")
         )
-        
-        # Hiển thị biểu đồ hình cột từ 0 trở lên
         st.bar_chart(df_top10["Tổng số lượng bán"])
         st.caption("Biểu đồ cột thể hiện tổng số lượng bán ra của 10 món nước được gọi nhiều nhất.")
 
@@ -174,16 +243,15 @@ with tab3:
             .cumsum()
         )
         st.line_chart(df_pivot)
-        st.caption("Biểu đồ đường thể hiện biến động số lượng các món nước qua từng đơn hàng.")
     else:
-        st.info("Chưa có dữ liệu đơn hàng để thống kê. Vui lòng nhập thêm đơn ở tab đầu tiên.")
+        st.info("Chưa có dữ liệu để vẽ biểu đồ.")
 
 with tab4:
     st.subheader("Tải dữ liệu về máy")
-    st.write("File Excel gồm toàn bộ đơn hàng hiện có trong phiên làm việc.")
+    df_current = load_data_from_db()
     st.download_button(
         "⬇️ Tải CafePOS.xlsx",
-        data=to_excel(st.session_state.orders),
+        data=to_excel(df_current),
         file_name="CafePOS.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary",
