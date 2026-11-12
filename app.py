@@ -8,7 +8,7 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="CafePOS", page_icon="☕", layout="wide")
 
 st.title("☕ CafePOS – Quản lý đơn hàng")
-st.caption("Nhập đơn hàng, tự tính tiền, xem danh sách, biểu đồ thống kê và tải dữ liệu Excel.")
+st.caption("Nhập đơn hàng, tự tính tiền, xem danh sách, thống kê Top 10 và tải dữ liệu Excel.")
 
 # Danh sách 50 món nước phổ biến
 DRINK_MENU = [
@@ -61,8 +61,7 @@ def to_excel(df):
 if "orders" not in st.session_state:
     st.session_state.orders = new_workbook_df()
 
-# Thêm 4 Tab giao diện
-tab1, tab2, tab3, tab4 = st.tabs(["➕ Nhập đơn hàng", "📋 Danh sách đơn", "📊 Thống kê biểu đồ", "📤 Xuất Excel"])
+tab1, tab2, tab3, tab4 = st.tabs(["➕ Nhập đơn hàng", "📋 Danh sách đơn", "🏆 Top 10 món bán chạy", "📤 Xuất Excel"])
 
 with tab1:
     st.subheader("Thông tin đơn hàng")
@@ -81,8 +80,9 @@ with tab1:
                 step=1000, 
                 placeholder="Bắt buộc nhập giá (VD: 25000)"
             )
-            discount = st.number_input("Chiết khấu (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
-            vat = st.number_input("VAT (%)", min_value=0.0, max_value=100.0, value=8.0, step=0.5)
+            # Chuyển sang số nguyên bước nhảy 1, 2, 3... không có số lẻ
+            discount = st.number_input("Chiết khấu (%)", min_value=0, max_value=100, value=0, step=1, format="%d")
+            vat = st.number_input("VAT (%)", min_value=0, max_value=100, value=8, step=1, format="%d")
         submitted = st.form_submit_button("Lưu đơn hàng", type="primary", use_container_width=True)
 
     if submitted:
@@ -92,9 +92,9 @@ with tab1:
             st.error("⚠️ Vui lòng nhập đơn giá hợp lệ (lớn hơn 0 đ) trước khi lưu đơn!")
         else:
             subtotal = int(quantity) * int(unit_price)
-            discount_amount = round(subtotal * discount / 100)
+            discount_amount = round(subtotal * int(discount) / 100)
             taxable = subtotal - discount_amount
-            vat_amount = round(taxable * vat / 100)
+            vat_amount = round(taxable * int(vat) / 100)
             total = taxable + vat_amount
             row = {
                 "STT": len(st.session_state.orders) + 1,
@@ -104,9 +104,9 @@ with tab1:
                 "Số lượng": int(quantity),
                 "Đơn giá": int(unit_price),
                 "Tiền hàng": subtotal,
-                "Chiết khấu (%)": float(discount),
+                "Chiết khấu (%)": int(discount),
                 "Tiền giảm": discount_amount,
-                "VAT (%)": float(vat),
+                "VAT (%)": int(vat),
                 "Tiền VAT": vat_amount,
                 "Tổng thanh toán": total,
             }
@@ -129,6 +129,33 @@ with tab2:
     else:
         st.info("Chưa có đơn hàng. Hãy nhập đơn ở tab “Nhập đơn hàng”.")
 
+with tab3:
+    st.subheader("🏆 Bảng thống kê 10 món nước được order nhiều nhất")
+    if len(st.session_state.orders) > 0:
+        # Gom nhóm theo sản phẩm, tính tổng số lượng và tổng doanh thu
+        df_top10 = (
+            st.session_state.orders.groupby("Sản phẩm", as_index=False)
+            .agg(
+                **{
+                    "Tổng số lượng bán": ("Số lượng", "sum"),
+                    "Tổng doanh thu": ("Tổng thanh toán", "sum")
+                }
+            )
+            .sort_values(by=["Tổng số lượng bán", "Tổng doanh thu"], ascending=[False, False])
+            .head(10)
+            .reset_index(drop=True)
+        )
+        # Thêm cột Xếp hạng 1, 2, 3...
+        df_top10.insert(0, "Hạng", range(1, len(df_top10) + 1))
+        
+        # Định dạng hiển thị tiền đẹp mắt trên bảng
+        df_top10_display = df_top10.copy()
+        df_top10_display["Tổng doanh thu"] = df_top10_display["Tổng doanh thu"].apply(lambda x: f"{x:,.0f} đ")
+        
+        st.dataframe(df_top10_display, use_container_width=True, hide_index=True)
+    else:
+        st.info("Chưa có dữ liệu đơn hàng để thống kê. Vui lòng nhập thêm đơn ở tab đầu tiên.")
+
 with tab4:
     st.subheader("Tải dữ liệu về máy")
     st.write("File Excel gồm toàn bộ đơn hàng hiện có trong phiên làm việc.")
@@ -140,17 +167,3 @@ with tab4:
         type="primary",
         use_container_width=True,
     )
-
-with tab3:
-    st.subheader("📊 Biểu đồ thống kê số lượng món nước được mua")
-    if len(st.session_state.orders) > 0:
-        # Gom nhóm tổng số lượng theo từng sản phẩm và sắp xếp từ thấp đến cao
-        df_chart = st.session_state.orders.groupby("Sản phẩm")["Số lượng"].sum().reset_index()
-        df_chart = df_chart.sort_values(by="Số lượng", ascending=True)
-        df_chart = df_chart.set_index("Sản phẩm")
-        
-        # Hiển thị biểu đồ dạng cột ngang (bar chart)
-        st.bar_chart(df_chart, horizontal=True)
-        st.caption("Biểu đồ hiển thị tổng số lượng khách mua của từng món (sắp xếp từ thấp đến cao).")
-    else:
-        st.info("Chưa có dữ liệu đơn hàng để vẽ biểu đồ. Vui lòng nhập thêm đơn ở tab đầu tiên.")
