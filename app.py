@@ -3,29 +3,32 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import uuid
+
 from io import BytesIO
 from datetime import date, datetime
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
-# =====================================================
-# 1. CẤU HÌNH ỨNG DỤNG
-# =====================================================
+
+# =========================================================
+# 1. CẤU HÌNH
+# =========================================================
 
 st.set_page_config(
-    page_title="CafePOS - Quản lý quán cà phê",
+    page_title="CafePOS",
     page_icon="☕",
     layout="wide"
 )
 
 DB_NAME = "cafepos.db"
 
-st.title("☕ CafePOS")
-st.caption("Hệ thống quản lý đơn hàng quán cà phê")
+st.title("☕ CafePOS - Quản lý quán cà phê")
+st.caption("Quản lý đơn hàng | Nhiều sản phẩm | Thống kê | Xuất Excel")
 
-# =====================================================
+
+# =========================================================
 # 2. DANH SÁCH SẢN PHẨM
-# =====================================================
+# =========================================================
 
 DRINK_MENU = [
     "-- Chọn món nước --",
@@ -58,9 +61,10 @@ DRINK_MENU = [
     "Sữa chua đánh đá", "Sữa chua việt quất"
 ]
 
-# =====================================================
-# 3. HÀM ĐỊNH DẠNG TIỀN
-# =====================================================
+
+# =========================================================
+# 3. HÀM TIỆN ÍCH
+# =========================================================
 
 def format_money(value):
     try:
@@ -69,145 +73,369 @@ def format_money(value):
         return "0 đ"
 
 
-# =====================================================
-# 4. DATABASE SQLITE
-# =====================================================
+def format_number(value):
+    return f"{int(value):,}".replace(",", ".")
+
+
+def normalize_date(value):
+    """Chuyển ngày cũ và ngày mới về YYYY-MM-DD."""
+    if not value:
+        return date.today().isoformat()
+
+    try:
+        return pd.to_datetime(
+            value,
+            dayfirst=True
+        ).strftime("%Y-%m-%d")
+    except Exception:
+        return date.today().isoformat()
+
 
 def get_connection():
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30)
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
+# =========================================================
+# 4. KHỞI TẠO VÀ TỰ ĐỘNG SỬA DATABASE
+# =========================================================
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+
+    conn = sqlite3.connect(DB_NAME, timeout=30)
+
+    # Tạm tắt khóa ngoại để chuyển đổi cấu trúc bảng an toàn
     conn.execute("PRAGMA foreign_keys = OFF")
-    cursor = conn.cursor()
 
-    # Kiểm tra bảng orders hiện tại
-    cursor.execute("""
-        SELECT name FROM sqlite_master
-        WHERE type='table' AND name='orders'
-    """)
-    table = cursor.fetchone()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        cursor = conn.cursor()
 
-    if table:
-        cursor.execute("PRAGMA table_info(orders)")
-        columns = [col[1] for col in cursor.fetchall()]
+        # Kiểm tra các bảng đang tồn tại
+        cursor.execute("""
+            SELECT name
+            FROM sqlite_master
+            WHERE type='table'
+        """)
 
-        # Nếu là database cũ thì chuyển đổi
-        if "stt" in columns and "ma_don" not in columns:
+        existing_tables = {
+            row[0] for row in cursor.fetchall()
+        }
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS orders_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ma_don TEXT UNIQUE,
-                    ngay TEXT,
-                    khach_hang TEXT,
-                    chiet_khau INTEGER DEFAULT 0,
-                    vat INTEGER DEFAULT 8,
-                    tien_hang INTEGER DEFAULT 0,
-                    tien_giam INTEGER DEFAULT 0,
-                    tien_vat INTEGER DEFAULT 0,
-                    tong_thanh_toan INTEGER DEFAULT 0
-                )
-            """)
+        candidate_tables = [
+            "orders",
+            "orders_new",
+            "orders_legacy"
+        ]
 
-            cursor.execute("SELECT * FROM orders")
-            rows = cursor.fetchall()
+        # -------------------------------------------------
+        # 4.1 Đọc và sao lưu dữ liệu các bảng cũ trong RAM
+        # -------------------------------------------------
 
-            old_columns = [
-                col[1] for col in
-                conn.execute("PRAGMA table_info(orders)").fetchall()
+        saved_orders = {}
+        table_id_to_code = {}
+
+        for table_name in candidate_tables:
+
+            if table_name not in existing_tables:
+                continue
+
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            columns = [
+                row[1] for row in cursor.fetchall()
             ]
 
+            cursor.execute(f"SELECT * FROM {table_name}")
+            rows = cursor.fetchall()
+
             for row in rows:
-                old = dict(zip(old_columns, row))
 
-                ma_don = "OLD-" + str(old["id"])
+                data = dict(zip(columns, row))
 
-                cursor.execute("""
-                    INSERT OR IGNORE INTO orders_new (
-                        ma_don, ngay, khach_hang,
-                        chiet_khau, vat, tien_hang,
-                        tien_giam, tien_vat, tong_thanh_toan
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
+                old_id = data.get("id")
+
+                if data.get("ma_don"):
+                    ma_don = str(data["ma_don"])
+
+                elif old_id is not None:
+                    ma_don = f"OLD-{old_id}"
+
+                else:
+                    ma_don = "OLD-" + uuid.uuid4().hex[:10]
+
+                table_id_to_code[
+                    (table_name, old_id)
+                ] = ma_don
+
+                # Chuyển cả hai cấu trúc dữ liệu về một cấu trúc
+                saved_orders.setdefault(ma_don, {
+                    "ma_don": ma_don,
+                    "ngay": normalize_date(
+                        data.get("ngay")
+                    ),
+                    "khach_hang": (
+                        data.get("khach_hang") or "Khách lẻ"
+                    ),
+                    "chiet_khau": int(
+                        data.get("chiet_khau") or 0
+                    ),
+                    "vat": int(
+                        data.get("vat") or 0
+                    ),
+                    "tien_hang": int(
+                        data.get("tien_hang") or 0
+                    ),
+                    "tien_giam": int(
+                        data.get("tien_giam") or 0
+                    ),
+                    "tien_vat": int(
+                        data.get("tien_vat") or 0
+                    ),
+                    "tong_thanh_toan": int(
+                        data.get("tong_thanh_toan") or 0
+                    ),
+                    "legacy_product": data.get("san_pham"),
+                    "legacy_quantity": data.get("so_luong"),
+                    "legacy_price": data.get("don_gia")
+                })
+
+        # -------------------------------------------------
+        # 4.2 Đọc chi tiết sản phẩm đã tồn tại
+        # -------------------------------------------------
+
+        saved_items = []
+
+        if "order_items" in existing_tables:
+
+            cursor.execute("PRAGMA table_info(order_items)")
+            item_columns = [
+                row[1] for row in cursor.fetchall()
+            ]
+
+            cursor.execute("PRAGMA foreign_key_list(order_items)")
+            foreign_keys = cursor.fetchall()
+
+            parent_table = (
+                foreign_keys[0][2]
+                if foreign_keys
+                else "orders"
+            )
+
+            cursor.execute("SELECT * FROM order_items")
+
+            for row in cursor.fetchall():
+
+                item = dict(zip(item_columns, row))
+
+                order_code = table_id_to_code.get(
+                    (parent_table, item.get("order_id"))
+                )
+
+                if not order_code:
+                    # Thử tìm trong các bảng khác nếu
+                    # database cũ đã tham chiếu sai bảng
+                    for table_name in candidate_tables:
+                        order_code = table_id_to_code.get(
+                            (table_name, item.get("order_id"))
+                        )
+                        if order_code:
+                            break
+
+                if order_code and order_code in saved_orders:
+
+                    saved_items.append({
+                        "ma_don": order_code,
+                        "san_pham": item.get("san_pham"),
+                        "so_luong": int(
+                            item.get("so_luong") or 1
+                        ),
+                        "don_gia": int(
+                            item.get("don_gia") or 0
+                        ),
+                        "tien_hang": int(
+                            item.get("tien_hang") or 0
+                        )
+                    })
+
+        # -------------------------------------------------
+        # 4.3 Xóa các bảng cũ theo thứ tự an toàn
+        # -------------------------------------------------
+
+        if "order_items" in existing_tables:
+            cursor.execute("DROP TABLE order_items")
+
+        for table_name in candidate_tables:
+            if table_name in existing_tables:
+                cursor.execute(
+                    f"DROP TABLE {table_name}"
+                )
+
+        # -------------------------------------------------
+        # 4.4 Tạo lại hai bảng chuẩn
+        # -------------------------------------------------
+
+        cursor.execute("""
+            CREATE TABLE orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ma_don TEXT UNIQUE NOT NULL,
+                ngay TEXT,
+                khach_hang TEXT,
+                chiet_khau INTEGER DEFAULT 0,
+                vat INTEGER DEFAULT 8,
+                tien_hang INTEGER DEFAULT 0,
+                tien_giam INTEGER DEFAULT 0,
+                tien_vat INTEGER DEFAULT 0,
+                tong_thanh_toan INTEGER DEFAULT 0
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE order_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                san_pham TEXT NOT NULL,
+                so_luong INTEGER NOT NULL,
+                don_gia INTEGER NOT NULL,
+                tien_hang INTEGER NOT NULL,
+                FOREIGN KEY(order_id)
+                    REFERENCES orders(id)
+                    ON DELETE CASCADE
+            )
+        """)
+
+        # -------------------------------------------------
+        # 4.5 Khôi phục đơn hàng
+        # -------------------------------------------------
+
+        new_order_ids = {}
+
+        for ma_don, data in saved_orders.items():
+
+            cursor.execute("""
+                INSERT INTO orders (
                     ma_don,
-                    old.get("ngay"),
-                    old.get("khach_hang", "Khách lẻ"),
-                    old.get("chiet_khau", 0),
-                    old.get("vat", 8),
-                    old.get("tien_hang", 0),
-                    old.get("tien_giam", 0),
-                    old.get("tien_vat", 0),
-                    old.get("tong_thanh_toan", 0)
-                ))
+                    ngay,
+                    khach_hang,
+                    chiet_khau,
+                    vat,
+                    tien_hang,
+                    tien_giam,
+                    tien_vat,
+                    tong_thanh_toan
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                data["ma_don"],
+                data["ngay"],
+                data["khach_hang"],
+                data["chiet_khau"],
+                data["vat"],
+                data["tien_hang"],
+                data["tien_giam"],
+                data["tien_vat"],
+                data["tong_thanh_toan"]
+            ))
 
-                cursor.execute("""
-                    INSERT INTO order_items (
-                        order_id, san_pham,
-                        so_luong, don_gia, tien_hang
-                    )
-                    SELECT
-                        n.id, ?, ?, ?, ?
-                    FROM orders_new n
-                    WHERE n.ma_don = ?
-                """, (
-                    old.get("san_pham", "Sản phẩm cũ"),
-                    old.get("so_luong", 1),
-                    old.get("don_gia", 0),
-                    old.get("tien_hang", 0),
-                    ma_don
-                ))
+            new_order_ids[ma_don] = cursor.lastrowid
 
-            cursor.execute("DROP TABLE orders")
-            cursor.execute("ALTER TABLE orders_new RENAME TO orders")
+        # -------------------------------------------------
+        # 4.6 Khôi phục chi tiết sản phẩm
+        # -------------------------------------------------
 
-    # Đảm bảo bảng orders tồn tại
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ma_don TEXT UNIQUE,
-            ngay TEXT,
-            khach_hang TEXT,
-            chiet_khau INTEGER DEFAULT 0,
-            vat INTEGER DEFAULT 8,
-            tien_hang INTEGER DEFAULT 0,
-            tien_giam INTEGER DEFAULT 0,
-            tien_vat INTEGER DEFAULT 0,
-            tong_thanh_toan INTEGER DEFAULT 0
-        )
-    """)
+        restored_codes = set()
 
-    # Đảm bảo bảng chi tiết tồn tại
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS order_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            order_id INTEGER,
-            san_pham TEXT,
-            so_luong INTEGER,
-            don_gia INTEGER,
-            tien_hang INTEGER,
-            FOREIGN KEY(order_id)
-            REFERENCES orders(id)
-            ON DELETE CASCADE
-        )
-    """)
+        for item in saved_items:
 
-    conn.commit()
-    conn.close()
+            order_id = new_order_ids.get(item["ma_don"])
 
-init_db()
+            if not order_id:
+                continue
+
+            if not item["san_pham"]:
+                continue
+
+            cursor.execute("""
+                INSERT INTO order_items (
+                    order_id,
+                    san_pham,
+                    so_luong,
+                    don_gia,
+                    tien_hang
+                )
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                order_id,
+                item["san_pham"],
+                item["so_luong"],
+                item["don_gia"],
+                item["tien_hang"]
+            ))
+
+            restored_codes.add(item["ma_don"])
+
+        # Đơn hàng cũ chưa có bảng chi tiết thì tạo lại
+        for ma_don, data in saved_orders.items():
+
+            if ma_don in restored_codes:
+                continue
+
+            product = data.get("legacy_product")
+
+            if not product:
+                continue
+
+            order_id = new_order_ids[ma_don]
+
+            quantity = int(
+                data.get("legacy_quantity") or 1
+            )
+
+            price = int(
+                data.get("legacy_price") or 0
+            )
+
+            cursor.execute("""
+                INSERT INTO order_items (
+                    order_id,
+                    san_pham,
+                    so_luong,
+                    don_gia,
+                    tien_hang
+                )
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                order_id,
+                product,
+                quantity,
+                price,
+                int(data.get("tien_hang") or quantity * price)
+            ))
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        conn.close()
 
 
-# =====================================================
-# 5. CÁC HÀM XỬ LÝ DATABASE
-# =====================================================
+# Chạy kiểm tra database trước khi mở giao diện
+try:
+    init_db()
+except Exception as e:
+    st.error(f"Không thể khởi tạo Database: {e}")
+    st.stop()
+
+
+# =========================================================
+# 5. LẤY DỮ LIỆU
+# =========================================================
 
 def load_orders():
+
     conn = get_connection()
 
     df = pd.read_sql_query("""
@@ -227,10 +455,12 @@ def load_orders():
     """, conn)
 
     conn.close()
+
     return df
 
 
 def load_items(order_id=None):
+
     conn = get_connection()
 
     sql = """
@@ -245,21 +475,37 @@ def load_items(order_id=None):
     """
 
     if order_id is not None:
+
         sql += " WHERE i.order_id = ?"
-        df = pd.read_sql_query(sql, conn, params=(order_id,))
+
+        df = pd.read_sql_query(
+            sql,
+            conn,
+            params=(order_id,)
+        )
+
     else:
+
         sql += " ORDER BY i.id DESC"
+
         df = pd.read_sql_query(sql, conn)
 
     conn.close()
+
     return df
 
 
+# =========================================================
+# 6. LƯU ĐƠN HÀNG
+# =========================================================
+
 def save_order(customer, order_date, discount, vat, items):
+
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
+
         ma_don = (
             "DH"
             + datetime.now().strftime("%Y%m%d%H%M%S")
@@ -267,7 +513,8 @@ def save_order(customer, order_date, discount, vat, items):
         )
 
         subtotal = sum(
-            item["tien_hang"] for item in items
+            item["tien_hang"]
+            for item in items
         )
 
         discount_amount = round(
@@ -284,9 +531,15 @@ def save_order(customer, order_date, discount, vat, items):
 
         cursor.execute("""
             INSERT INTO orders (
-                ma_don, ngay, khach_hang,
-                chiet_khau, vat, tien_hang,
-                tien_giam, tien_vat, tong_thanh_toan
+                ma_don,
+                ngay,
+                khach_hang,
+                chiet_khau,
+                vat,
+                tien_hang,
+                tien_giam,
+                tien_vat,
+                tong_thanh_toan
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
@@ -304,10 +557,14 @@ def save_order(customer, order_date, discount, vat, items):
         order_id = cursor.lastrowid
 
         for item in items:
+
             cursor.execute("""
                 INSERT INTO order_items (
-                    order_id, san_pham,
-                    so_luong, don_gia, tien_hang
+                    order_id,
+                    san_pham,
+                    so_luong,
+                    don_gia,
+                    tien_hang
                 )
                 VALUES (?, ?, ?, ?, ?)
             """, (
@@ -330,40 +587,59 @@ def save_order(customer, order_date, discount, vat, items):
         conn.close()
 
 
+# =========================================================
+# 7. XÓA DỮ LIỆU
+# =========================================================
+
 def delete_order(order_id):
+
     conn = get_connection()
-    conn.execute("DELETE FROM orders WHERE id=?", (order_id,))
+
+    conn.execute(
+        "DELETE FROM orders WHERE id=?",
+        (order_id,)
+    )
+
     conn.commit()
     conn.close()
 
 
 def clear_database():
+
     conn = get_connection()
+
     conn.execute("DELETE FROM order_items")
     conn.execute("DELETE FROM orders")
+
     conn.commit()
     conn.close()
 
 
-# =====================================================
-# 6. HÀM HIỂN THỊ BẢNG TIỀN
-# =====================================================
+# =========================================================
+# 8. ĐỊNH DẠNG BẢNG
+# =========================================================
 
 def format_dataframe(df, money_columns):
+
     result = df.copy()
 
     for col in money_columns:
+
         if col in result.columns:
-            result[col] = result[col].apply(format_money)
+
+            result[col] = result[col].apply(
+                format_money
+            )
 
     return result
 
 
-# =====================================================
-# 7. XUẤT EXCEL
-# =====================================================
+# =========================================================
+# 9. XUẤT EXCEL
+# =========================================================
 
 def to_excel(orders_df, items_df):
+
     output = BytesIO()
 
     with pd.ExcelWriter(
@@ -384,64 +660,70 @@ def to_excel(orders_df, items_df):
         )
 
         for sheet_name in writer.book.sheetnames:
+
             ws = writer.book[sheet_name]
 
             ws.freeze_panes = "A2"
             ws.auto_filter.ref = ws.dimensions
 
             for cell in ws[1]:
+
                 cell.font = Font(
                     bold=True,
                     color="FFFFFF"
                 )
+
                 cell.fill = PatternFill(
                     "solid",
                     fgColor="234E52"
                 )
+
                 cell.alignment = Alignment(
                     horizontal="center",
                     vertical="center"
                 )
 
             for column in ws.columns:
+
                 max_length = max(
                     len(str(cell.value or ""))
                     for cell in column
                 )
-                letter = get_column_letter(column[0].column)
+
+                letter = get_column_letter(
+                    column[0].column
+                )
+
                 ws.column_dimensions[letter].width = min(
                     max(max_length + 4, 14),
                     35
                 )
 
+            money_columns = (
+                [6, 7, 8, 9]
+                if sheet_name == "DanhSachDon"
+                else [4, 5]
+            )
+
             for row in ws.iter_rows(min_row=2):
+
                 for cell in row:
+
                     cell.alignment = Alignment(
                         vertical="center"
                     )
 
-                    if isinstance(cell.value, (int, float)):
-                        if cell.column in (
-                            [7, 8, 9, 10] if sheet_name == "DanhSachDon"
-                            else [4, 5]
-                        ):
-                            cell.number_format = '#,##0" đ"'
+                    if cell.column in money_columns:
+                        cell.number_format = '#,##0" đ"'
 
     output.seek(0)
+
     return output.getvalue()
 
 
-# =====================================================
-# 8. SESSION STATE
-# =====================================================
-
-if "form_version" not in st.session_state:
-    st.session_state.form_version = 0
-
-
-# =====================================================
-# 9. GIAO DIỆN 4 TRANG
-# =====================================================
+# =========================================================
+# 10. GIAO DIỆN
+# =========================================================
 
 tab1, tab2, tab3, tab4 = st.tabs([
     "➕ Nhập đơn hàng",
@@ -451,13 +733,16 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 
-# =====================================================
+# =========================================================
 # TRANG 1: NHẬP ĐƠN HÀNG
-# =====================================================
+# =========================================================
 
 with tab1:
 
     st.subheader("➕ Tạo đơn hàng mới")
+
+    if "form_version" not in st.session_state:
+        st.session_state.form_version = 0
 
     with st.form(
         f"order_form_{st.session_state.form_version}"
@@ -466,6 +751,7 @@ with tab1:
         col1, col2 = st.columns(2)
 
         with col1:
+
             order_date = st.date_input(
                 "Ngày bán",
                 value=date.today()
@@ -477,6 +763,7 @@ with tab1:
             )
 
         with col2:
+
             discount = st.number_input(
                 "Chiết khấu (%)",
                 min_value=0,
@@ -495,11 +782,11 @@ with tab1:
 
         st.divider()
 
-        st.markdown("### 🥤 Danh sách món trong đơn")
+        st.markdown("### 🥤 Danh sách món nước")
 
         st.caption(
-            "Bạn có thể thêm nhiều dòng sản phẩm. "
-            "Mỗi dòng tương ứng với một loại nước."
+            "Nhấn dấu + ở cuối bảng để thêm sản phẩm. "
+            "Một đơn có thể chứa nhiều loại nước."
         )
 
         initial_items = pd.DataFrame([{
@@ -518,8 +805,7 @@ with tab1:
                 "Sản phẩm": st.column_config.SelectboxColumn(
                     "Tên món nước",
                     options=DRINK_MENU,
-                    required=True,
-                    width="large"
+                    required=True
                 ),
                 "Số lượng": st.column_config.NumberColumn(
                     "Số lượng",
@@ -555,11 +841,7 @@ with tab1:
             quantity = item["Số lượng"]
             price = item["Đơn giá"]
 
-            # Bỏ qua dòng chưa sử dụng
-            if product == "-- Chọn món nước --":
-                continue
-
-            if pd.isna(product) or not product:
+            if pd.isna(product) or product == "-- Chọn món nước --":
                 continue
 
             if pd.isna(quantity) or quantity < 1:
@@ -570,7 +852,7 @@ with tab1:
 
             if pd.isna(price) or price <= 0:
                 errors.append(
-                    f"Dòng {index + 1}: Vui lòng nhập đơn giá."
+                    f"Dòng {index + 1}: Đơn giá phải lớn hơn 0."
                 )
                 continue
 
@@ -585,14 +867,18 @@ with tab1:
             })
 
         if errors:
+
             for error in errors:
                 st.error(error)
 
-        elif len(valid_items) == 0:
+        elif not valid_items:
+
             st.error("Vui lòng chọn ít nhất một món nước!")
 
         else:
+
             try:
+
                 result = save_order(
                     customer.strip() or "Khách lẻ",
                     order_date,
@@ -625,20 +911,21 @@ with tab1:
                 )
 
                 st.info(
-                    f"Đơn hàng có {len(valid_items)} loại nước, "
-                    f"tổng số lượng: {sum(i['so_luong'] for i in valid_items)}."
+                    f"Có {len(valid_items)} loại nước, "
+                    f"tổng số lượng {sum(i['so_luong'] for i in valid_items)}."
                 )
 
                 st.session_state.form_version += 1
                 st.rerun()
 
             except Exception as e:
+
                 st.error(f"Lỗi khi lưu đơn hàng: {e}")
 
 
-# =====================================================
+# =========================================================
 # TRANG 2: DANH SÁCH ĐƠN HÀNG
-# =====================================================
+# =========================================================
 
 with tab2:
 
@@ -648,16 +935,17 @@ with tab2:
 
     if not df_orders.empty:
 
-        # Bộ lọc
         col1, col2 = st.columns(2)
 
         with col1:
+
             search_customer = st.text_input(
                 "🔍 Tìm khách hàng hoặc mã đơn",
-                placeholder="Nhập tên khách hàng / mã đơn..."
+                placeholder="Nhập tên hoặc mã đơn..."
             )
 
         with col2:
+
             search_product = st.selectbox(
                 "Lọc theo sản phẩm",
                 ["Tất cả sản phẩm"] + DRINK_MENU[1:]
@@ -666,6 +954,7 @@ with tab2:
         filtered = df_orders.copy()
 
         if search_customer:
+
             filtered = filtered[
                 filtered["Khách hàng"].str.contains(
                     search_customer,
@@ -682,47 +971,51 @@ with tab2:
 
         if search_product != "Tất cả sản phẩm":
 
-            product_orders = load_items()
+            all_items = load_items()
 
-            matched_ids = product_orders[
-                product_orders["Sản phẩm"] == search_product
+            matched_orders = all_items[
+                all_items["Sản phẩm"] == search_product
             ]["Mã đơn"].tolist()
 
             filtered = filtered[
-                filtered["Mã đơn"].isin(matched_ids)
+                filtered["Mã đơn"].isin(matched_orders)
             ]
-
-        # Thống kê nhanh
-        total_revenue = filtered["Tổng thanh toán"].sum()
 
         m1, m2 = st.columns(2)
 
         m1.metric(
             "Tổng số đơn",
-            f"{len(filtered):,}".replace(",", ".")
+            format_number(len(filtered))
         )
 
         m2.metric(
             "Tổng doanh thu",
-            format_money(total_revenue)
+            format_money(
+                filtered["Tổng thanh toán"].sum()
+            )
         )
 
         st.divider()
 
-        # Hiển thị bảng
-        display_df = filtered.drop(columns=["id"]).copy()
+        st.markdown("### Danh sách đơn")
 
-        for col in [
-            "Tiền hàng",
-            "Tiền giảm",
-            "Tiền VAT",
-            "Tổng thanh toán"
-        ]:
-            display_df[col] = display_df[col].apply(format_money)
+        display_df = filtered.drop(
+            columns=["id"]
+        ).copy()
 
-        display_df["Ngày"] = pd.to_datetime(
-            display_df["Ngày"]
-        ).dt.strftime("%d/%m/%Y")
+        display_df["Ngày"] = display_df["Ngày"].apply(
+            lambda x: pd.to_datetime(x).strftime("%d/%m/%Y")
+        )
+
+        display_df = format_dataframe(
+            display_df,
+            [
+                "Tiền hàng",
+                "Tiền giảm",
+                "Tiền VAT",
+                "Tổng thanh toán"
+            ]
+        )
 
         st.dataframe(
             display_df,
@@ -732,106 +1025,106 @@ with tab2:
 
         st.divider()
 
-        st.subheader("🔎 Xem chi tiết đơn hàng")
+        st.markdown("### 🔎 Chi tiết đơn hàng")
 
-        order_options = filtered["Mã đơn"].tolist()
+        selected_order = st.selectbox(
+            "Chọn mã đơn hàng",
+            filtered["Mã đơn"].tolist()
+        )
 
-        if order_options:
+        selected_info = filtered[
+            filtered["Mã đơn"] == selected_order
+        ].iloc[0]
 
-            selected_order = st.selectbox(
-                "Chọn mã đơn hàng",
-                order_options
+        selected_id = int(selected_info["id"])
+
+        details = load_items(selected_id)
+
+        st.write(f"**Mã đơn:** {selected_order}")
+        st.write(f"**Khách hàng:** {selected_info['Khách hàng']}")
+
+        details_display = details.drop(
+            columns=["Mã đơn"]
+        ).copy()
+
+        details_display = format_dataframe(
+            details_display,
+            ["Đơn giá", "Tiền hàng"]
+        )
+
+        st.dataframe(
+            details_display,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        x1, x2, x3 = st.columns(3)
+
+        x1.metric(
+            "Tiền hàng",
+            format_money(selected_info["Tiền hàng"])
+        )
+
+        x2.metric(
+            "Tiền VAT",
+            format_money(selected_info["Tiền VAT"])
+        )
+
+        x3.metric(
+            "Tổng thanh toán",
+            format_money(selected_info["Tổng thanh toán"])
+        )
+
+        with st.popover("🗑️ Xóa đơn hàng này"):
+
+            st.warning(
+                f"Bạn có chắc muốn xóa {selected_order}?"
             )
 
-            selected_id = filtered.loc[
-                filtered["Mã đơn"] == selected_order,
-                "id"
-            ].iloc[0]
+            if st.button(
+                "Xác nhận xóa",
+                type="primary",
+                key="delete_one"
+            ):
 
-            details = load_items(selected_id)
+                delete_order(selected_id)
 
-            st.markdown(f"**Mã đơn: {selected_order}**")
-
-            details_display = details.drop(
-                columns=["Mã đơn"]
-            ).copy()
-
-            details_display["Đơn giá"] = (
-                details_display["Đơn giá"].apply(format_money)
-            )
-
-            details_display["Tiền hàng"] = (
-                details_display["Tiền hàng"].apply(format_money)
-            )
-
-            st.dataframe(
-                details_display,
-                use_container_width=True,
-                hide_index=True
-            )
-
-            selected_info = filtered[
-                filtered["Mã đơn"] == selected_order
-            ].iloc[0]
-
-            x1, x2, x3 = st.columns(3)
-
-            x1.metric(
-                "Tiền hàng",
-                format_money(selected_info["Tiền hàng"])
-            )
-
-            x2.metric(
-                "Tiền VAT",
-                format_money(selected_info["Tiền VAT"])
-            )
-
-            x3.metric(
-                "Tổng thanh toán",
-                format_money(selected_info["Tổng thanh toán"])
-            )
-
-            with st.popover("🗑️ Xóa đơn hàng này"):
-                st.warning(
-                    f"Bạn có chắc muốn xóa đơn {selected_order}?"
-                )
-
-                if st.button(
-                    "Xác nhận xóa đơn",
-                    type="primary",
-                    key="delete_one"
-                ):
-                    delete_order(int(selected_id))
-                    st.success("Đã xóa đơn hàng!")
-                    st.rerun()
+                st.success("Đã xóa đơn hàng!")
+                st.rerun()
 
         st.divider()
 
         with st.expander("⚠️ Quản lý dữ liệu"):
 
             st.warning(
-                "Xóa toàn bộ dữ liệu sẽ không thể khôi phục."
+                "Xóa toàn bộ đơn hàng sẽ không thể khôi phục."
             )
 
             confirm_delete = st.checkbox(
-                "Tôi xác nhận muốn xóa toàn bộ đơn hàng"
+                "Tôi xác nhận muốn xóa toàn bộ dữ liệu"
             )
 
             if st.button(
                 "🗑️ XÓA TOÀN BỘ DATABASE",
                 disabled=not confirm_delete
             ):
+
                 clear_database()
+
                 st.success("Đã xóa toàn bộ dữ liệu!")
                 st.rerun()
 
     else:
-        st.info("Chưa có đơn hàng nào. Hãy tạo đơn hàng mới!")
+
+        st.info(
+            "Chưa có đơn hàng nào. "
+            "Hãy chuyển sang trang Nhập đơn hàng."
+        )
 
 
-# =====================================================
-# TRANG 3: THỐNG KÊ VÀ BIỂU ĐỒ
-# =====================================================
+# =========================================================
+# TRANG 3: THỐNG KÊ
+# =========================================================
 
 with tab3:
 
@@ -856,12 +1149,11 @@ with tab3:
             "Khách hàng"
         ].nunique()
 
-        # 4 thẻ tổng quan
         c1, c2, c3, c4 = st.columns(4)
 
         c1.metric(
             "Tổng đơn hàng",
-            f"{total_orders:,}".replace(",", ".")
+            format_number(total_orders)
         )
 
         c2.metric(
@@ -870,19 +1162,18 @@ with tab3:
         )
 
         c3.metric(
-            "Tổng sản phẩm bán",
-            f"{total_products:,}".replace(",", ".")
+            "Sản phẩm đã bán",
+            format_number(total_products)
         )
 
         c4.metric(
             "Số khách hàng",
-            f"{total_customers:,}".replace(",", ".")
+            format_number(total_customers)
         )
 
         st.divider()
 
-        # Top 10 món nước
-        st.subheader("🏆 Top 10 món nước bán chạy")
+        st.markdown("### 🏆 Top 10 món nước bán chạy")
 
         top10 = (
             df_items.groupby("Sản phẩm")["Số lượng"]
@@ -892,6 +1183,7 @@ with tab3:
         )
 
         if not top10.empty:
+
             st.bar_chart(
                 top10,
                 horizontal=True
@@ -899,8 +1191,7 @@ with tab3:
 
         st.divider()
 
-        # Doanh thu theo ngày
-        st.subheader("📈 Biểu đồ doanh thu theo ngày")
+        st.markdown("### 📈 Doanh thu theo ngày")
 
         revenue_by_day = df_orders.copy()
 
@@ -920,8 +1211,7 @@ with tab3:
 
         st.divider()
 
-        # Số lượng từng sản phẩm theo ngày
-        st.subheader("🥤 Số lượng sản phẩm bán theo ngày")
+        st.markdown("### 🥤 Số lượng sản phẩm bán theo ngày")
 
         product_by_day = df_items.merge(
             df_orders[["Mã đơn", "Ngày"]],
@@ -943,24 +1233,20 @@ with tab3:
         st.line_chart(product_pivot)
 
     else:
+
         st.info(
-            "Chưa có dữ liệu để thống kê. "
-            "Hãy nhập đơn hàng trước!"
+            "Chưa có dữ liệu thống kê. "
+            "Hãy tạo đơn hàng trước!"
         )
 
 
-# =====================================================
+# =========================================================
 # TRANG 4: XUẤT EXCEL
-# =====================================================
+# =========================================================
 
 with tab4:
 
     st.subheader("📤 Xuất dữ liệu Excel")
-
-    st.write(
-        "Tải toàn bộ dữ liệu đơn hàng và chi tiết sản phẩm "
-        "về máy tính."
-    )
 
     df_orders = load_orders()
     df_items = load_items()
@@ -968,24 +1254,23 @@ with tab4:
     if not df_orders.empty:
 
         st.success(
-            f"Hiện có {len(df_orders)} đơn hàng trong hệ thống."
+            f"Hệ thống hiện có {format_number(len(df_orders))} đơn hàng."
         )
 
-        col1, col2 = st.columns(2)
+        c1, c2 = st.columns(2)
 
-        col1.metric(
-            "Số đơn hàng",
-            f"{len(df_orders):,}".replace(",", ".")
+        c1.metric(
+            "Tổng số đơn",
+            format_number(len(df_orders))
         )
 
-        col2.metric(
+        c2.metric(
             "Tổng doanh thu",
             format_money(
                 df_orders["Tổng thanh toán"].sum()
             )
         )
 
-        # Chuẩn bị dữ liệu xuất
         export_orders = df_orders.drop(
             columns=["id"]
         ).copy()
@@ -994,31 +1279,35 @@ with tab4:
             export_orders["Ngày"]
         ).dt.strftime("%d/%m/%Y")
 
-        export_items = df_items.copy()
-
-        excel_file = to_excel(
+        export_file = to_excel(
             export_orders,
-            export_items
+            df_items
         )
 
         st.divider()
 
         st.download_button(
             label="⬇️ TẢI FILE CAFEPOS.XLSX",
-            data=excel_file,
-            file_name=f"CafePOS_{date.today().strftime('%d%m%Y')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            data=export_file,
+            file_name=(
+                f"CafePOS_{date.today().strftime('%d%m%Y')}.xlsx"
+            ),
+            mime=(
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            ),
             type="primary",
             use_container_width=True
         )
 
         st.caption(
-            "File Excel bao gồm 2 sheet: DanhSachDon và ChiTietDon."
+            "File gồm 2 sheet: DanhSachDon và ChiTietDon."
         )
 
-        with st.expander("Xem trước dữ liệu xuất"):
+        with st.expander("Xem trước dữ liệu Excel"):
 
             st.markdown("**Danh sách đơn hàng**")
+
             st.dataframe(
                 format_dataframe(
                     export_orders,
@@ -1034,9 +1323,10 @@ with tab4:
             )
 
             st.markdown("**Chi tiết sản phẩm**")
+
             st.dataframe(
                 format_dataframe(
-                    export_items,
+                    df_items,
                     ["Đơn giá", "Tiền hàng"]
                 ),
                 use_container_width=True,
@@ -1044,17 +1334,18 @@ with tab4:
             )
 
     else:
+
         st.info(
-            "Chưa có dữ liệu. Hãy nhập đơn hàng trước khi xuất Excel."
+            "Chưa có đơn hàng để xuất Excel."
         )
 
 
-# =====================================================
-# 10. FOOTER
-# =====================================================
+# =========================================================
+# 11. FOOTER
+# =========================================================
 
 st.divider()
 
 st.caption(
-    "☕ CafePOS | Quản lý đơn hàng | SQLite Database | Excel Export"
+    "☕ CafePOS | Quản lý đơn hàng | SQLite | Excel Export"
 )
