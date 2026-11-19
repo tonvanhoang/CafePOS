@@ -2,6 +2,9 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+import requests
+import html
+
 from datetime import datetime, date
 from io import BytesIO
 
@@ -17,8 +20,9 @@ st.set_page_config(
 
 DB_NAME = "cafe_pos.db"
 
+
 # ==================================================
-# 2. MENU ĐỒ UỐNG
+# 2. MENU VÀ GIÁ SẢN PHẨM
 # ==================================================
 
 MENU = {
@@ -51,97 +55,136 @@ MENU = {
     "Nước suối": 20000
 }
 
-# ==================================================
-# 3. HÌNH ẢNH ONLINE
-# ==================================================
 
-IMAGES = {
+# ==================================================
+# 3. HÌNH ẢNH SẢN PHẨM ONLINE
+# ==================================================
+# Ảnh được lấy từ Unsplash.
+# Tất cả URL đều yêu cầu ảnh 600x400.
+# fit=crop giúp chuẩn hóa tỷ lệ ảnh.
+
+IMAGE_URLS = {
     "coffee": (
         "https://images.unsplash.com/photo-1509042239860-f550ce710b93"
-        "?auto=format&fit=crop&w=600&q=85"
+        "?auto=format&fit=crop&w=600&h=400&crop=center&q=85"
     ),
 
     "milk_coffee": (
         "https://images.unsplash.com/photo-1461023058943-07fcbe16d735"
-        "?auto=format&fit=crop&w=600&q=85"
+        "?auto=format&fit=crop&w=600&h=400&crop=center&q=85"
+    ),
+
+    "espresso": (
+        "https://images.unsplash.com/photo-1510591509098-f4fdc6d0ff04"
+        "?auto=format&fit=crop&w=600&h=400&crop=center&q=85"
     ),
 
     "tea": (
         "https://images.unsplash.com/photo-1556679343-c7306c1976bc"
-        "?auto=format&fit=crop&w=600&q=85"
+        "?auto=format&fit=crop&w=600&h=400&crop=center&q=85"
     ),
 
     "matcha": (
         "https://images.unsplash.com/photo-1515823064-d6e0c04616a7"
-        "?auto=format&fit=crop&w=600&q=85"
-    ),
-
-    "smoothie": (
-        "https://images.unsplash.com/photo-1505252585461-04db1eb84625"
-        "?auto=format&fit=crop&w=600&q=85"
+        "?auto=format&fit=crop&w=600&h=400&crop=center&q=85"
     ),
 
     "juice": (
         "https://images.unsplash.com/photo-1600271886742-f049cd451bba"
-        "?auto=format&fit=crop&w=600&q=85"
+        "?auto=format&fit=crop&w=600&h=400&crop=center&q=85"
+    ),
+
+    "smoothie": (
+        "https://images.unsplash.com/photo-1505252585461-04db1eb84625"
+        "?auto=format&fit=crop&w=600&h=400&crop=center&q=85"
     ),
 
     "soda": (
         "https://images.unsplash.com/photo-1513558161293-cdaf765edfd4"
-        "?auto=format&fit=crop&w=600&q=85"
+        "?auto=format&fit=crop&w=600&h=400&crop=center&q=85"
     ),
 
     "water": (
         "https://images.unsplash.com/photo-1523362628745-0c100150b504"
-        "?auto=format&fit=crop&w=600&q=85"
+        "?auto=format&fit=crop&w=600&h=400&crop=center&q=85"
     )
 }
 
 
 def get_product_image(name):
 
-    if name in ["Cà phê đen", "Espresso", "Americano"]:
-        return IMAGES["coffee"]
+    if name in ["Cà phê đen", "Cà phê cốt dừa"]:
+        return IMAGE_URLS["coffee"]
 
-    elif name in [
-        "Cà phê sữa",
-        "Bạc xỉu",
-        "Cà phê muối",
-        "Cà phê cốt dừa",
-        "Cappuccino",
-        "Latte"
-    ]:
-        return IMAGES["milk_coffee"]
+    elif name in ["Cà phê sữa", "Bạc xỉu", "Cà phê muối"]:
+        return IMAGE_URLS["milk_coffee"]
+
+    elif name in ["Espresso", "Americano"]:
+        return IMAGE_URLS["espresso"]
+
+    elif name in ["Cappuccino", "Latte"]:
+        return IMAGE_URLS["milk_coffee"]
 
     elif "Matcha" in name:
-        return IMAGES["matcha"]
+        return IMAGE_URLS["matcha"]
 
-    elif name == "Ca cao đá":
-        return IMAGES["milk_coffee"]
+    elif name in ["Ca cao đá"]:
+        return IMAGE_URLS["milk_coffee"]
 
     elif "Trà sữa" in name or "Sữa tươi" in name:
-        return IMAGES["matcha"]
-
-    elif "Sinh tố" in name:
-        return IMAGES["smoothie"]
+        return IMAGE_URLS["matcha"]
 
     elif "Nước ép" in name:
-        return IMAGES["juice"]
+        return IMAGE_URLS["juice"]
+
+    elif "Sinh tố" in name:
+        return IMAGE_URLS["smoothie"]
 
     elif "Soda" in name:
-        return IMAGES["soda"]
+        return IMAGE_URLS["soda"]
 
     elif "Trà" in name:
-        return IMAGES["tea"]
+        return IMAGE_URLS["tea"]
 
     elif name == "Nước suối":
-        return IMAGES["water"]
+        return IMAGE_URLS["water"]
 
-    return IMAGES["tea"]
+    return IMAGE_URLS["tea"]
 
 
 # ==================================================
-# 4. CSS - GIAO DIỆN VÀ ANIMATION
+# 4. TẢI VÀ LƯU CACHE HÌNH ẢNH
+# ==================================================
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_image(url):
+
+    try:
+        response = requests.get(
+            url,
+            timeout=15,
+            headers={
+                "User-Agent": "Mozilla/5.0"
+            }
+        )
+
+        response.raise_for_status()
+
+        content_type = response.headers.get(
+            "Content-Type", ""
+        )
+
+        if not content_type.startswith("image/"):
+            return None
+
+        return response.content
+
+    except Exception:
+        return None
+
+
+# ==================================================
+# 5. CSS GIAO DIỆN
 # ==================================================
 
 st.markdown("""
@@ -149,14 +192,20 @@ st.markdown("""
 
 /* NỀN */
 .main {
-    background-color: #f7f8fc;
+    background: #f7f8fc;
+}
+
+/* TIÊU ĐỀ */
+h1 {
+    font-weight: 800 !important;
+    color: #202938;
 }
 
 /* ANIMATION */
-@keyframes fadeInProduct {
+@keyframes productAppear {
     from {
         opacity: 0;
-        transform: translateY(18px);
+        transform: translateY(15px);
     }
 
     to {
@@ -167,12 +216,15 @@ st.markdown("""
 
 /* THẺ SẢN PHẨM */
 div[data-testid="stVerticalBlockBorderWrapper"] {
-    border-radius: 14px !important;
-    border: 1px solid #e5e7eb !important;
     background: #ffffff !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 14px !important;
     padding: 10px !important;
 
-    animation: fadeInProduct 0.5s ease both;
+    height: 100% !important;
+    box-sizing: border-box !important;
+
+    animation: productAppear 0.45s ease both;
 
     transition:
         transform 0.3s ease,
@@ -180,74 +232,117 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
         border-color 0.3s ease;
 }
 
-/* HOVER THẺ */
+/* HOVER */
 div[data-testid="stVerticalBlockBorderWrapper"]:hover {
-    transform: translateY(-6px);
+    transform: translateY(-5px);
+
+    border-color: #16a34a !important;
 
     box-shadow:
         0 10px 25px rgba(0, 0, 0, 0.10);
-
-    border-color: #16a34a !important;
 }
 
-/* ẢNH SẢN PHẨM */
+/* ẢNH */
 div[data-testid="stImage"] {
-    width: 100%;
-    height: 180px !important;
-    overflow: hidden;
-    border-radius: 10px;
-}
-
-div[data-testid="stImage"] img {
     width: 100% !important;
     height: 180px !important;
-    object-fit: cover !important;
-    object-position: center !important;
+
+    overflow: hidden !important;
     border-radius: 10px !important;
 
-    transition: transform 0.4s ease;
+    display: block !important;
+}
+
+/* ÉP TẤT CẢ ẢNH CÙNG KHUNG */
+div[data-testid="stImage"] img {
+    display: block !important;
+
+    width: 100% !important;
+    height: 180px !important;
+
+    min-height: 180px !important;
+    max-height: 180px !important;
+
+    object-fit: cover !important;
+    object-position: center center !important;
+
+    border-radius: 10px !important;
+
+    transition: transform 0.4s ease !important;
 }
 
 /* ZOOM ẢNH */
 div[data-testid="stVerticalBlockBorderWrapper"]:hover
 div[data-testid="stImage"] img {
-    transform: scale(1.05);
+    transform: scale(1.06);
+}
+
+/* ẢNH LỖI */
+.image-fallback {
+    width: 100%;
+    height: 180px;
+
+    background: linear-gradient(
+        135deg,
+        #e8f5e9,
+        #d1fae5
+    );
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+
+    border-radius: 10px;
+    color: #15803d;
+    font-size: 38px;
 }
 
 /* TÊN SẢN PHẨM */
 .product-name {
-    font-size: 15px;
-    font-weight: 700;
-    color: #252525;
-
     height: 48px;
     min-height: 48px;
+    max-height: 48px;
+
+    overflow: hidden;
 
     display: flex;
     align-items: flex-start;
 
-    margin-top: 10px;
+    font-size: 14px;
+    font-weight: 700;
     line-height: 1.5;
+    color: #202938;
 
-    overflow: hidden;
+    margin-top: 10px;
 }
 
 /* GIÁ */
 .product-price {
-    font-size: 20px;
+    font-size: 19px;
     font-weight: 800;
+
     color: #16a34a;
 
     margin-top: 8px;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
 }
 
-/* Ô SỐ LƯỢNG */
+/* THÀNH TIỀN */
+.product-subtotal {
+    font-size: 12px;
+    color: #888888;
+
+    min-height: 22px;
+    margin-top: 5px;
+}
+
+/* INPUT */
 div[data-testid="stNumberInput"] input {
-    border-radius: 8px;
+    border-radius: 8px !important;
 }
 
-/* NÚT */
+/* BUTTON */
 div.stButton > button {
     border-radius: 9px !important;
     font-weight: 600 !important;
@@ -255,8 +350,10 @@ div.stButton > button {
     transition: all 0.25s ease !important;
 }
 
+/* BUTTON HOVER */
 div.stButton > button:hover {
     transform: translateY(-2px);
+
     border-color: #16a34a !important;
     color: #16a34a !important;
 
@@ -264,41 +361,47 @@ div.stButton > button:hover {
         0 5px 12px rgba(22, 163, 74, 0.15);
 }
 
+/* BUTTON CLICK */
 div.stButton > button:active {
-    transform: scale(0.96);
+    transform: scale(0.97);
 }
 
-/* GIỮ CÁC CỘT CÂN ĐỐI */
+/* CỘT */
 div[data-testid="stHorizontalBlock"] {
     align-items: stretch;
 }
 
-/* TÔ MÀU INPUT BẮT BUỘC */
-.required-label {
-    color: #dc2626;
-    font-weight: 700;
+/* GIÁ TỔNG */
+.total-payment {
+    background: #e8f5e9;
+
+    border: 1px solid #bbf7d0;
+
+    padding: 20px;
+    border-radius: 12px;
+
+    text-align: right;
 }
 
-/* RESPONSIVE */
-@media (max-width: 768px) {
-    div[data-testid="stImage"] {
-        height: 130px !important;
-    }
-
-    div[data-testid="stImage"] img {
-        height: 130px !important;
-    }
-
-    .product-name {
-        font-size: 13px;
-        height: 55px;
-    }
-
-    .product-price {
-        font-size: 16px;
-    }
+.total-payment .label {
+    font-size: 15px;
+    color: #374151;
 }
 
+.total-payment .amount {
+    font-size: 28px;
+    font-weight: 800;
+    color: #16a34a;
+}
+
+/* FOOTER */
+.footer {
+    text-align: center;
+    color: #888;
+    font-size: 13px;
+}
+
+/* GIẢM ANIMATION NẾU THIẾT BỊ YÊU CẦU */
 @media (prefers-reduced-motion: reduce) {
     div[data-testid="stVerticalBlockBorderWrapper"],
     div[data-testid="stImage"] img {
@@ -312,7 +415,7 @@ div[data-testid="stHorizontalBlock"] {
 
 
 # ==================================================
-# 5. HÀM HỖ TRỢ
+# 6. HÀM HỖ TRỢ
 # ==================================================
 
 def format_money(number):
@@ -320,26 +423,30 @@ def format_money(number):
 
 
 def get_connection():
+
     conn = sqlite3.connect(DB_NAME)
+
     conn.execute("PRAGMA foreign_keys = ON")
+
     return conn
 
 
 # ==================================================
-# 6. KHỞI TẠO DATABASE
+# 7. KHỞI TẠO DATABASE
 # ==================================================
 
 def init_db():
 
     conn = get_connection()
+
     cursor = conn.cursor()
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS pos_orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             order_code TEXT UNIQUE NOT NULL,
-            customer_name TEXT,
-            phone TEXT,
+            customer_name TEXT NOT NULL,
+            phone TEXT NOT NULL,
             note TEXT,
             created_at TEXT NOT NULL,
             total_amount INTEGER NOT NULL
@@ -354,9 +461,10 @@ def init_db():
             quantity INTEGER NOT NULL,
             price INTEGER NOT NULL,
             subtotal INTEGER NOT NULL,
+
             FOREIGN KEY (order_code)
-                REFERENCES pos_orders(order_code)
-                ON DELETE CASCADE
+            REFERENCES pos_orders(order_code)
+            ON DELETE CASCADE
         )
     """)
 
@@ -365,7 +473,7 @@ def init_db():
 
 
 # ==================================================
-# 7. LẤY ĐƠN HÀNG
+# 8. LẤY ĐƠN HÀNG
 # ==================================================
 
 def get_orders():
@@ -384,7 +492,7 @@ def get_orders():
 
 
 # ==================================================
-# 8. CHI TIẾT ĐƠN HÀNG
+# 9. CHI TIẾT ĐƠN HÀNG
 # ==================================================
 
 def get_order_items(order_code):
@@ -397,8 +505,11 @@ def get_order_items(order_code):
             quantity AS 'Số lượng',
             price AS 'Đơn giá',
             subtotal AS 'Thành tiền'
+
         FROM pos_order_items
+
         WHERE order_code = ?
+
         ORDER BY id ASC
     """, conn, params=(order_code,))
 
@@ -408,12 +519,10 @@ def get_order_items(order_code):
 
 
 # ==================================================
-# 9. LƯU ĐƠN HÀNG
+# 10. LƯU ĐƠN HÀNG
 # ==================================================
 
 def save_order(customer_name, phone, note, cart):
-
-    # KIỂM TRA THÔNG TIN BẮT BUỘC
 
     customer_name = customer_name.strip()
     phone = phone.strip()
@@ -506,7 +615,7 @@ def save_order(customer_name, phone, note, cart):
 
 
 # ==================================================
-# 10. XÓA ĐƠN HÀNG
+# 11. XÓA ĐƠN HÀNG
 # ==================================================
 
 def delete_order(order_code):
@@ -543,7 +652,7 @@ def delete_order(order_code):
 
 
 # ==================================================
-# 11. XUẤT EXCEL
+# 12. XUẤT EXCEL
 # ==================================================
 
 def create_excel():
@@ -558,7 +667,9 @@ def create_excel():
             note AS 'Ghi chú',
             created_at AS 'Ngày tạo',
             total_amount AS 'Tổng tiền'
+
         FROM pos_orders
+
         ORDER BY id DESC
     """, conn)
 
@@ -569,7 +680,9 @@ def create_excel():
             quantity AS 'Số lượng',
             price AS 'Đơn giá',
             subtotal AS 'Thành tiền'
+
         FROM pos_order_items
+
         ORDER BY id DESC
     """, conn)
 
@@ -611,7 +724,10 @@ def create_excel():
 
                 sheet.column_dimensions[
                     column_letter
-                ].width = min(max_length + 3, 35)
+                ].width = min(
+                    max_length + 3,
+                    35
+                )
 
     output.seek(0)
 
@@ -619,7 +735,7 @@ def create_excel():
 
 
 # ==================================================
-# 12. KHỞI TẠO SESSION STATE
+# 13. KHỞI TẠO SESSION
 # ==================================================
 
 init_db()
@@ -633,8 +749,9 @@ if "success_order" not in st.session_state:
 if "clear_customer_fields" not in st.session_state:
     st.session_state.clear_customer_fields = False
 
-# XÓA THÔNG TIN KHÁCH HÀNG SAU KHI THANH TOÁN
-# ĐẶT TRƯỚC KHI TẠO CÁC WIDGET INPUT
+
+# XÓA THÔNG TIN KHÁCH HÀNG SAU THANH TOÁN
+# Phải thực hiện trước khi tạo widget input.
 
 if st.session_state.clear_customer_fields:
 
@@ -643,6 +760,7 @@ if st.session_state.clear_customer_fields:
     st.session_state.order_note = ""
 
     st.session_state.clear_customer_fields = False
+
 
 if "customer_name" not in st.session_state:
     st.session_state.customer_name = ""
@@ -655,7 +773,7 @@ if "order_note" not in st.session_state:
 
 
 # ==================================================
-# 13. GIAO DIỆN CHÍNH
+# 14. GIAO DIỆN CHÍNH
 # ==================================================
 
 st.title("☕ CafePOS")
@@ -717,8 +835,7 @@ with tab1:
         )
 
     st.caption(
-        "🔴 Hai thông tin tên khách hàng và số điện thoại "
-        "là bắt buộc trước khi thanh toán."
+        "🔴 Bắt buộc nhập đầy đủ tên khách hàng và số điện thoại."
     )
 
     st.divider()
@@ -753,10 +870,9 @@ with tab1:
 
     filtered_products = []
 
-    for product in MENU.keys():
+    for product in MENU:
 
         if selected_category == "Tất cả":
-
             filtered_products.append(product)
 
         elif selected_category == "Cà phê":
@@ -801,12 +917,11 @@ with tab1:
                 filtered_products.append(product)
 
     st.caption(
-        f"Đang hiển thị {len(filtered_products)} sản phẩm. "
-        "Chọn số lượng và thêm vào đơn hàng."
+        f"Đang hiển thị {len(filtered_products)} sản phẩm."
     )
 
     # ----------------------------------------------
-    # HIỂN THỊ 5 SẢN PHẨM TRÊN MỘT HÀNG
+    # HIỂN THỊ 5 SẢN PHẨM MỖI HÀNG
     # ----------------------------------------------
 
     for row_start in range(
@@ -832,17 +947,38 @@ with tab1:
 
                     # ẢNH SẢN PHẨM
 
-                    st.image(
-                        image_url,
-                        use_container_width=True
-                    )
+                    image_data = load_image(image_url)
+
+                    if image_data:
+
+                        st.image(
+                            BytesIO(image_data),
+                            use_container_width=True
+                        )
+
+                    else:
+
+                        st.markdown(
+                            f"""
+                            <div class="image-fallback">
+                                🥤
+                                <span style="
+                                    font-size:12px;
+                                    margin-top:8px;
+                                ">
+                                    {html.escape(product)}
+                                </span>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
 
                     # TÊN SẢN PHẨM
 
                     st.markdown(
                         f"""
                         <div class="product-name">
-                            {product}
+                            {html.escape(product)}
                         </div>
                         """,
                         unsafe_allow_html=True
@@ -870,15 +1006,20 @@ with tab1:
                         key=f"quantity_{product}"
                     )
 
-                    # TÍNH THÀNH TIỀN
+                    # THÀNH TIỀN
 
                     subtotal = price * int(quantity)
 
-                    st.caption(
-                        f"Thành tiền: {format_money(subtotal)}"
+                    st.markdown(
+                        f"""
+                        <div class="product-subtotal">
+                            Thành tiền: {format_money(subtotal)}
+                        </div>
+                        """,
+                        unsafe_allow_html=True
                     )
 
-                    # NÚT THÊM VÀO ĐƠN
+                    # THÊM VÀO ĐƠN
 
                     if st.button(
                         "➕ Thêm vào đơn",
@@ -910,7 +1051,7 @@ with tab1:
                             })
 
                         st.toast(
-                            f"Đã thêm {quantity} x {product}!",
+                            f"Đã thêm {product} vào đơn hàng!",
                             icon="✅"
                         )
 
@@ -928,7 +1069,7 @@ with tab1:
 
         total_order = 0
 
-        # TIÊU ĐỀ BẢNG
+        # TIÊU ĐỀ
 
         col1, col2, col3, col4, col5 = st.columns(
             [3, 1, 1.5, 1.5, 1]
@@ -941,8 +1082,6 @@ with tab1:
         col5.write("**Xóa**")
 
         st.divider()
-
-        # DANH SÁCH MÓN
 
         for index, item in enumerate(
             st.session_state.cart
@@ -974,8 +1113,7 @@ with tab1:
 
                 if st.button(
                     "🗑️",
-                    key=f"remove_cart_{index}",
-                    help="Xóa sản phẩm này"
+                    key=f"remove_cart_{index}"
                 ):
 
                     st.session_state.cart.pop(index)
@@ -984,27 +1122,18 @@ with tab1:
 
         st.divider()
 
-        # TỔNG THANH TOÁN
+        # TỔNG TIỀN
 
         st.markdown(
             f"""
-            <div style="
-                background-color: #e8f5e9;
-                padding: 18px;
-                border-radius: 10px;
-                text-align: right;
-            ">
-                <span style="font-size:18px;">
+            <div class="total-payment">
+                <div class="label">
                     TỔNG THANH TOÁN
-                </span>
-                <br>
-                <span style="
-                    font-size:28px;
-                    font-weight:800;
-                    color:#16a34a;
-                ">
+                </div>
+
+                <div class="amount">
                     {format_money(total_order)}
-                </span>
+                </div>
             </div>
             """,
             unsafe_allow_html=True
@@ -1022,11 +1151,9 @@ with tab1:
 
         st.divider()
 
-        # ----------------------------------------------
-        # THANH TOÁN
-        # ----------------------------------------------
-
         col1, col2 = st.columns(2)
+
+        # THANH TOÁN
 
         with col1:
 
@@ -1036,23 +1163,17 @@ with tab1:
                 use_container_width=True
             ):
 
-                # KIỂM TRA TÊN
-
                 if not customer_name.strip():
 
                     st.error(
-                        "⚠️ Vui lòng nhập tên khách hàng trước khi thanh toán."
+                        "⚠️ Vui lòng nhập tên khách hàng."
                     )
-
-                # KIỂM TRA SỐ ĐIỆN THOẠI
 
                 elif not phone.strip():
 
                     st.error(
-                        "⚠️ Vui lòng nhập số điện thoại trước khi thanh toán."
+                        "⚠️ Vui lòng nhập số điện thoại."
                     )
-
-                # KIỂM TRA GIỎ HÀNG
 
                 elif not st.session_state.cart:
 
@@ -1075,16 +1196,13 @@ with tab1:
 
                         st.session_state.cart = []
 
-                        # ĐÁNH DẤU XÓA THÔNG TIN
-                        # SẼ THỰC HIỆN TRƯỚC LẦN HIỂN THỊ INPUT TIẾP THEO
+                        # ĐÁNH DẤU XÓA THÔNG TIN KHÁCH
 
                         st.session_state.clear_customer_fields = True
 
-                        # LƯU THÔNG BÁO THÀNH CÔNG
+                        # THÔNG BÁO THÀNH CÔNG
 
                         st.session_state.success_order = result
-
-                        # TẢI LẠI GIAO DIỆN
 
                         st.rerun()
 
@@ -1093,6 +1211,8 @@ with tab1:
                         st.error(
                             f"Không thể lưu đơn hàng: {result}"
                         )
+
+        # XÓA GIỎ HÀNG
 
         with col2:
 
@@ -1186,8 +1306,6 @@ with tab2:
             f"Tìm thấy **{len(filtered_orders)} đơn hàng**."
         )
 
-        # HIỂN THỊ BẢNG
-
         display_orders = filtered_orders.copy()
 
         display_orders = display_orders.rename(
@@ -1204,9 +1322,7 @@ with tab2:
         if not display_orders.empty:
 
             display_orders["Tổng tiền"] = (
-                display_orders["Tổng tiền"].apply(
-                    format_money
-                )
+                display_orders["Tổng tiền"].apply(format_money)
             )
 
         st.dataframe(
@@ -1216,8 +1332,6 @@ with tab2:
         )
 
         st.divider()
-
-        # CHI TIẾT ĐƠN HÀNG
 
         st.subheader("🔍 Xem chi tiết / Xóa đơn hàng")
 
@@ -1241,13 +1355,11 @@ with tab2:
             )
 
             st.write(
-                f"**Khách hàng:** "
-                f"{selected_info['customer_name'] or 'Khách lẻ'}"
+                f"**Khách hàng:** {selected_info['customer_name']}"
             )
 
             st.write(
-                f"**Số điện thoại:** "
-                f"{selected_info['phone'] or 'Không có'}"
+                f"**Số điện thoại:** {selected_info['phone']}"
             )
 
             st.write(
@@ -1255,8 +1367,7 @@ with tab2:
             )
 
             st.write(
-                f"**Ghi chú:** "
-                f"{selected_info['note'] or 'Không có'}"
+                f"**Ghi chú:** {selected_info['note'] or 'Không có'}"
             )
 
             details = get_order_items(selected_order)
@@ -1266,15 +1377,11 @@ with tab2:
                 display_details = details.copy()
 
                 display_details["Đơn giá"] = (
-                    display_details["Đơn giá"].apply(
-                        format_money
-                    )
+                    display_details["Đơn giá"].apply(format_money)
                 )
 
                 display_details["Thành tiền"] = (
-                    display_details["Thành tiền"].apply(
-                        format_money
-                    )
+                    display_details["Thành tiền"].apply(format_money)
                 )
 
                 st.dataframe(
@@ -1284,10 +1391,7 @@ with tab2:
                 )
 
             st.markdown(
-                f"""
-                ### Tổng đơn:
-                :green[{format_money(selected_info['total_amount'])}]
-                """
+                f"### Tổng đơn: :green[{format_money(selected_info['total_amount'])}]"
             )
 
             st.divider()
@@ -1325,15 +1429,11 @@ with tab2:
 
         else:
 
-            st.info(
-                "Không tìm thấy đơn hàng phù hợp."
-            )
+            st.info("Không tìm thấy đơn hàng phù hợp.")
 
     else:
 
-        st.info(
-            "Chưa có đơn hàng nào được lưu."
-        )
+        st.info("Chưa có đơn hàng nào được lưu.")
 
 
 # ==================================================
@@ -1383,8 +1483,6 @@ with tab3:
             items["quantity"].sum()
             if not items.empty else 0
         )
-
-        # THẺ THỐNG KÊ
 
         col1, col2, col3, col4 = st.columns(4)
 
@@ -1464,15 +1562,11 @@ with tab3:
 
         else:
 
-            st.info(
-                "Chưa có dữ liệu sản phẩm."
-            )
+            st.info("Chưa có dữ liệu sản phẩm.")
 
     else:
 
-        st.info(
-            "Chưa có dữ liệu để thống kê."
-        )
+        st.info("Chưa có dữ liệu để thống kê.")
 
 
 # ==================================================
@@ -1513,17 +1607,20 @@ with tab4:
 
     else:
 
-        st.info(
-            "Chưa có đơn hàng để xuất Excel."
-        )
+        st.info("Chưa có đơn hàng để xuất Excel.")
 
 
 # ==================================================
-# 14. CHÂN TRANG
+# 15. CHÂN TRANG
 # ==================================================
 
 st.divider()
 
-st.caption(
-    "CafePOS | Phần mềm quản lý bán hàng quán nước"
+st.markdown(
+    """
+    <div class="footer">
+        ☕ CafePOS | Phần mềm quản lý bán hàng quán nước
+    </div>
+    """,
+    unsafe_allow_html=True
 )
