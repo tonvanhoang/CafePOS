@@ -18,7 +18,7 @@ st.set_page_config(
 DB_NAME = "cafe_pos.db"
 
 # ==================================================
-# 2. MENU ĐỒ UỐNG VÀ GIÁ BÁN
+# 2. MENU ĐỒ UỐNG
 # ==================================================
 
 MENU = {
@@ -51,50 +51,49 @@ MENU = {
     "Nước suối": 20000
 }
 
-
 # ==================================================
-# 3. HÌNH ẢNH SẢN PHẨM ONLINE
+# 3. HÌNH ẢNH ONLINE
 # ==================================================
 
 IMAGES = {
     "coffee": (
         "https://images.unsplash.com/photo-1509042239860-f550ce710b93"
-        "?auto=format&fit=crop&w=500&q=80"
+        "?auto=format&fit=crop&w=600&q=85"
     ),
 
     "milk_coffee": (
         "https://images.unsplash.com/photo-1461023058943-07fcbe16d735"
-        "?auto=format&fit=crop&w=500&q=80"
+        "?auto=format&fit=crop&w=600&q=85"
     ),
 
     "tea": (
         "https://images.unsplash.com/photo-1556679343-c7306c1976bc"
-        "?auto=format&fit=crop&w=500&q=80"
+        "?auto=format&fit=crop&w=600&q=85"
     ),
 
     "matcha": (
         "https://images.unsplash.com/photo-1515823064-d6e0c04616a7"
-        "?auto=format&fit=crop&w=500&q=80"
+        "?auto=format&fit=crop&w=600&q=85"
     ),
 
     "smoothie": (
         "https://images.unsplash.com/photo-1505252585461-04db1eb84625"
-        "?auto=format&fit=crop&w=500&q=80"
+        "?auto=format&fit=crop&w=600&q=85"
     ),
 
     "juice": (
         "https://images.unsplash.com/photo-1600271886742-f049cd451bba"
-        "?auto=format&fit=crop&w=500&q=80"
+        "?auto=format&fit=crop&w=600&q=85"
     ),
 
     "soda": (
         "https://images.unsplash.com/photo-1513558161293-cdaf765edfd4"
-        "?auto=format&fit=crop&w=500&q=80"
+        "?auto=format&fit=crop&w=600&q=85"
     ),
 
     "water": (
         "https://images.unsplash.com/photo-1523362628745-0c100150b504"
-        "?auto=format&fit=crop&w=500&q=80"
+        "?auto=format&fit=crop&w=600&q=85"
     )
 }
 
@@ -117,7 +116,7 @@ def get_product_image(name):
     elif "Matcha" in name:
         return IMAGES["matcha"]
 
-    elif name in ["Ca cao đá"]:
+    elif name == "Ca cao đá":
         return IMAGES["milk_coffee"]
 
     elif "Trà sữa" in name or "Sữa tươi" in name:
@@ -142,44 +141,171 @@ def get_product_image(name):
 
 
 # ==================================================
-# 4. CSS GIAO DIỆN
+# 4. CSS - GIAO DIỆN VÀ ANIMATION
 # ==================================================
 
 st.markdown("""
 <style>
 
-    .main {
-        background-color: #f8f9fc;
+/* NỀN */
+.main {
+    background-color: #f7f8fc;
+}
+
+/* ANIMATION */
+@keyframes fadeInProduct {
+    from {
+        opacity: 0;
+        transform: translateY(18px);
     }
 
-    .product-name {
-        font-size: 15px;
-        font-weight: 700;
-        min-height: 48px;
-        color: #252525;
-        margin-top: 8px;
+    to {
+        opacity: 1;
+        transform: translateY(0);
     }
+}
 
-    .product-price {
-        font-size: 19px;
-        font-weight: 800;
-        color: #16a34a;
-        margin-top: 5px;
-        margin-bottom: 8px;
-    }
+/* THẺ SẢN PHẨM */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border-radius: 14px !important;
+    border: 1px solid #e5e7eb !important;
+    background: #ffffff !important;
+    padding: 10px !important;
 
-    div[data-testid="stVerticalBlockBorderWrapper"] {
-        border-radius: 12px;
-    }
+    animation: fadeInProduct 0.5s ease both;
 
-    div.stButton > button {
-        border-radius: 8px;
-        font-weight: 600;
+    transition:
+        transform 0.3s ease,
+        box-shadow 0.3s ease,
+        border-color 0.3s ease;
+}
+
+/* HOVER THẺ */
+div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+    transform: translateY(-6px);
+
+    box-shadow:
+        0 10px 25px rgba(0, 0, 0, 0.10);
+
+    border-color: #16a34a !important;
+}
+
+/* ẢNH SẢN PHẨM */
+div[data-testid="stImage"] {
+    width: 100%;
+    height: 180px !important;
+    overflow: hidden;
+    border-radius: 10px;
+}
+
+div[data-testid="stImage"] img {
+    width: 100% !important;
+    height: 180px !important;
+    object-fit: cover !important;
+    object-position: center !important;
+    border-radius: 10px !important;
+
+    transition: transform 0.4s ease;
+}
+
+/* ZOOM ẢNH */
+div[data-testid="stVerticalBlockBorderWrapper"]:hover
+div[data-testid="stImage"] img {
+    transform: scale(1.05);
+}
+
+/* TÊN SẢN PHẨM */
+.product-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: #252525;
+
+    height: 48px;
+    min-height: 48px;
+
+    display: flex;
+    align-items: flex-start;
+
+    margin-top: 10px;
+    line-height: 1.5;
+
+    overflow: hidden;
+}
+
+/* GIÁ */
+.product-price {
+    font-size: 20px;
+    font-weight: 800;
+    color: #16a34a;
+
+    margin-top: 8px;
+    margin-bottom: 10px;
+}
+
+/* Ô SỐ LƯỢNG */
+div[data-testid="stNumberInput"] input {
+    border-radius: 8px;
+}
+
+/* NÚT */
+div.stButton > button {
+    border-radius: 9px !important;
+    font-weight: 600 !important;
+
+    transition: all 0.25s ease !important;
+}
+
+div.stButton > button:hover {
+    transform: translateY(-2px);
+    border-color: #16a34a !important;
+    color: #16a34a !important;
+
+    box-shadow:
+        0 5px 12px rgba(22, 163, 74, 0.15);
+}
+
+div.stButton > button:active {
+    transform: scale(0.96);
+}
+
+/* GIỮ CÁC CỘT CÂN ĐỐI */
+div[data-testid="stHorizontalBlock"] {
+    align-items: stretch;
+}
+
+/* TÔ MÀU INPUT BẮT BUỘC */
+.required-label {
+    color: #dc2626;
+    font-weight: 700;
+}
+
+/* RESPONSIVE */
+@media (max-width: 768px) {
+    div[data-testid="stImage"] {
+        height: 130px !important;
     }
 
     div[data-testid="stImage"] img {
-        border-radius: 10px;
+        height: 130px !important;
     }
+
+    .product-name {
+        font-size: 13px;
+        height: 55px;
+    }
+
+    .product-price {
+        font-size: 16px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    div[data-testid="stVerticalBlockBorderWrapper"],
+    div[data-testid="stImage"] img {
+        animation: none !important;
+        transition: none !important;
+    }
+}
 
 </style>
 """, unsafe_allow_html=True)
@@ -239,7 +365,7 @@ def init_db():
 
 
 # ==================================================
-# 7. LẤY DANH SÁCH ĐƠN HÀNG
+# 7. LẤY ĐƠN HÀNG
 # ==================================================
 
 def get_orders():
@@ -287,8 +413,19 @@ def get_order_items(order_code):
 
 def save_order(customer_name, phone, note, cart):
 
+    # KIỂM TRA THÔNG TIN BẮT BUỘC
+
+    customer_name = customer_name.strip()
+    phone = phone.strip()
+
+    if not customer_name:
+        return False, "Vui lòng nhập tên khách hàng."
+
+    if not phone:
+        return False, "Vui lòng nhập số điện thoại."
+
     if not cart:
-        return False, "Đơn hàng chưa có sản phẩm."
+        return False, "Giỏ hàng chưa có sản phẩm."
 
     total_amount = sum(
         item["quantity"] * item["price"]
@@ -493,6 +630,29 @@ if "cart" not in st.session_state:
 if "success_order" not in st.session_state:
     st.session_state.success_order = None
 
+if "clear_customer_fields" not in st.session_state:
+    st.session_state.clear_customer_fields = False
+
+# XÓA THÔNG TIN KHÁCH HÀNG SAU KHI THANH TOÁN
+# ĐẶT TRƯỚC KHI TẠO CÁC WIDGET INPUT
+
+if st.session_state.clear_customer_fields:
+
+    st.session_state.customer_name = ""
+    st.session_state.customer_phone = ""
+    st.session_state.order_note = ""
+
+    st.session_state.clear_customer_fields = False
+
+if "customer_name" not in st.session_state:
+    st.session_state.customer_name = ""
+
+if "customer_phone" not in st.session_state:
+    st.session_state.customer_phone = ""
+
+if "order_note" not in st.session_state:
+    st.session_state.order_note = ""
+
 
 # ==================================================
 # 13. GIAO DIỆN CHÍNH
@@ -532,31 +692,40 @@ with tab1:
 
     st.header("Tạo đơn hàng mới")
 
+    # ----------------------------------------------
     # THÔNG TIN KHÁCH HÀNG
+    # ----------------------------------------------
+
+    st.subheader("👤 Thông tin khách hàng")
 
     col1, col2 = st.columns(2)
 
     with col1:
 
         customer_name = st.text_input(
-            "Tên khách hàng",
-            placeholder="Nhập tên khách hàng",
+            "Tên khách hàng *",
+            placeholder="Bắt buộc nhập tên khách hàng",
             key="customer_name"
         )
 
     with col2:
 
         phone = st.text_input(
-            "Số điện thoại",
-            placeholder="Nhập số điện thoại",
+            "Số điện thoại *",
+            placeholder="Bắt buộc nhập số điện thoại",
             key="customer_phone"
         )
 
+    st.caption(
+        "🔴 Hai thông tin tên khách hàng và số điện thoại "
+        "là bắt buộc trước khi thanh toán."
+    )
+
     st.divider()
 
-    # ==================================================
-    # MENU SẢN PHẨM
-    # ==================================================
+    # ----------------------------------------------
+    # DANH MỤC SẢN PHẨM
+    # ----------------------------------------------
 
     st.subheader("🧋 MENU ĐỒ UỐNG")
 
@@ -578,9 +747,9 @@ with tab1:
         key="product_category"
     )
 
-    # ==================================================
+    # ----------------------------------------------
     # LỌC SẢN PHẨM
-    # ==================================================
+    # ----------------------------------------------
 
     filtered_products = []
 
@@ -636,9 +805,9 @@ with tab1:
         "Chọn số lượng và thêm vào đơn hàng."
     )
 
-    # ==================================================
+    # ----------------------------------------------
     # HIỂN THỊ 5 SẢN PHẨM TRÊN MỘT HÀNG
-    # ==================================================
+    # ----------------------------------------------
 
     for row_start in range(
         0,
@@ -655,14 +824,13 @@ with tab1:
         for index, product in enumerate(row_products):
 
             price = MENU[product]
-
             image_url = get_product_image(product)
 
             with cols[index]:
 
                 with st.container(border=True):
 
-                    # HÌNH ẢNH SẢN PHẨM
+                    # ẢNH SẢN PHẨM
 
                     st.image(
                         image_url,
@@ -702,7 +870,7 @@ with tab1:
                         key=f"quantity_{product}"
                     )
 
-                    # THÀNH TIỀN
+                    # TÍNH THÀNH TIỀN
 
                     subtotal = price * int(quantity)
 
@@ -760,7 +928,7 @@ with tab1:
 
         total_order = 0
 
-        # TIÊU ĐỀ GIỎ HÀNG
+        # TIÊU ĐỀ BẢNG
 
         col1, col2, col3, col4, col5 = st.columns(
             [3, 1, 1.5, 1.5, 1]
@@ -791,28 +959,16 @@ with tab1:
             )
 
             with col1:
-
-                st.write(
-                    f"**{item['product_name']}**"
-                )
+                st.write(f"**{item['product_name']}**")
 
             with col2:
-
-                st.write(
-                    item["quantity"]
-                )
+                st.write(item["quantity"])
 
             with col3:
-
-                st.write(
-                    format_money(item["price"])
-                )
+                st.write(format_money(item["price"]))
 
             with col4:
-
-                st.write(
-                    f"**{format_money(subtotal)}**"
-                )
+                st.write(f"**{format_money(subtotal)}**")
 
             with col5:
 
@@ -864,9 +1020,13 @@ with tab1:
             key="order_note"
         )
 
-        col1, col2 = st.columns(2)
+        st.divider()
 
+        # ----------------------------------------------
         # THANH TOÁN
+        # ----------------------------------------------
+
+        col1, col2 = st.columns(2)
 
         with col1:
 
@@ -876,28 +1036,63 @@ with tab1:
                 use_container_width=True
             ):
 
-                success, result = save_order(
-                    customer_name.strip(),
-                    phone.strip(),
-                    note.strip(),
-                    st.session_state.cart
-                )
+                # KIỂM TRA TÊN
 
-                if success:
+                if not customer_name.strip():
 
-                    st.session_state.cart = []
+                    st.error(
+                        "⚠️ Vui lòng nhập tên khách hàng trước khi thanh toán."
+                    )
 
-                    st.session_state.success_order = result
+                # KIỂM TRA SỐ ĐIỆN THOẠI
 
-                    st.rerun()
+                elif not phone.strip():
+
+                    st.error(
+                        "⚠️ Vui lòng nhập số điện thoại trước khi thanh toán."
+                    )
+
+                # KIỂM TRA GIỎ HÀNG
+
+                elif not st.session_state.cart:
+
+                    st.error(
+                        "⚠️ Giỏ hàng chưa có sản phẩm."
+                    )
 
                 else:
 
-                    st.error(
-                        f"Không thể lưu đơn hàng: {result}"
+                    success, result = save_order(
+                        customer_name,
+                        phone,
+                        note,
+                        st.session_state.cart
                     )
 
-        # XÓA GIỎ HÀNG
+                    if success:
+
+                        # XÓA GIỎ HÀNG
+
+                        st.session_state.cart = []
+
+                        # ĐÁNH DẤU XÓA THÔNG TIN
+                        # SẼ THỰC HIỆN TRƯỚC LẦN HIỂN THỊ INPUT TIẾP THEO
+
+                        st.session_state.clear_customer_fields = True
+
+                        # LƯU THÔNG BÁO THÀNH CÔNG
+
+                        st.session_state.success_order = result
+
+                        # TẢI LẠI GIAO DIỆN
+
+                        st.rerun()
+
+                    else:
+
+                        st.error(
+                            f"Không thể lưu đơn hàng: {result}"
+                        )
 
         with col2:
 
@@ -1022,7 +1217,7 @@ with tab2:
 
         st.divider()
 
-        # XEM CHI TIẾT
+        # CHI TIẾT ĐƠN HÀNG
 
         st.subheader("🔍 Xem chi tiết / Xóa đơn hàng")
 
@@ -1064,9 +1259,7 @@ with tab2:
                 f"{selected_info['note'] or 'Không có'}"
             )
 
-            details = get_order_items(
-                selected_order
-            )
+            details = get_order_items(selected_order)
 
             if not details.empty:
 
